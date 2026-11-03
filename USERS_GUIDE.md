@@ -7,7 +7,7 @@
 ---
 
 ## Table of Contents
-1. [Overview & Quick Start](#1-overview--quick-start)
+1. [Overview & Motivation](#1-overview--motivation)
 2. [Hardware & Antenna Setup](#2-hardware--antenna-setup)
 3. [Display Layout & Screen Anatomy](#3-display-layout--screen-anatomy)
 4. [Operating Controls (Touch & Rotary Dial)](#4-operating-controls-touch--rotary-dial)
@@ -19,11 +19,19 @@
 
 ---
 
-## 1. Overview & Quick Start
+## 1. Overview & Motivation
 
-The GNSS Compass is a standalone, dual-antenna azimuth compass designed for amateur radio microwave and weak-signal operation. Utilizing dual-antenna GNSS carrier-phase interferometry (via the Unicore UM982 receiver), it calculates true antenna azimuth heading accurate to $< 0.5^\circ$ with $0.1^\circ$ resolution—completely immune to magnetic deviation, iron structures, and rotator calibration drift.
+### Why Dual-Antenna GNSS? (The Motivation)
+Operating weak-signal VHF, UHF, and microwave bands—especially portable on mountaintops or as a mobile rover—demands exact antenna pointing. At microwave frequencies (such as 10 GHz or 24 GHz), dish beamwidths can be just a few degrees wide. Traditional methods for determining antenna azimuth have significant operational drawbacks:
+* **Beacon Calibration Delays:** Operators often have to hunt for known distant beacons or reference stations to align or recalibrate mechanical antenna rotators. If a beacon is off the air or obstructed by terrain, calibration is stalled.
+* **Magnetic Distortion:** Magnetic compasses and fluxgate sensors are notoriously unreliable near vehicle sheet metal, masts, iron towers, and high-current power cables.
+* **Cluttered Operating Desks:** In the field, an operator typically has to juggle multiple disparate tools: a rotator direction indicator, a handheld GPS for grid squares, a laptop or smartphone app for great-circle bearing and distance calculations, and a separate master clock for UTC log timing.
 
-![GNSS Compass Operating Unit](docs/images/unit_overview.png)
+**The GNSS Compass replaces all of this with a single, self-contained instrument:**
+1. **Zero Calibration Required:** By measuring the carrier-phase difference of satellite signals between two matched antennas (interferometry), the unit calculates **true azimuth heading accurate to $< 0.5^\circ$** with $0.1^\circ$ resolution from first principles. It requires no alignment against beacons, no magnetic compensation, and no recalibration after transport.
+2. **All-in-One Operating Telemetry:** It integrates real-time antenna azimuth, target bearing calculation, reverse bearing, geodesic distance, official ARRL contest scoring distance, live 8-digit Maidenhead grid locators, and atomic-synchronized UTC time—all visible on one high-contrast circular display.
+
+![GNSS Compass Operating Unit](docs/images/unit_overview.jpg)
 *Photo 1 Specification: Wide desk or field operating shot showing the rotary display unit powered on, showing live heading and grid squares next to a radio or rotator controller.*
 
 ### 30-Second Quick Start:
@@ -55,12 +63,12 @@ The GNSS Compass is a standalone, dual-antenna azimuth compass designed for amat
 
 The 480×480 full-color circular display organizes critical navigation and station telemetry into seven functional rows:
 
-![Circular Screen Annotated Row Map](docs/images/screen_annotated_layout.png)
+![Circular Screen Annotated Row Map](docs/images/screen_annotated_layout.jpg)
 *Photo 3 Specification: Clear, close-up, high-contrast photo or direct capture of the 480×480 display in active operation, with numbered callout bubbles for each of the 7 rows.*
 
 | Row | Function | Example Display | Description |
 |:---:|:---|:---:|:---|
-| **1** | **Local Grid** | `CM87wa00` | 8-digit Maidenhead locator calculated from live GPS coordinates. Tap row to activate Rover mode. |
+| **1** | **Local Grid** | `CM87wa00` | 8-digit Maidenhead locator calculated from live GPS coordinates. Tap when leaving a site to track departure distance in Rover mode. |
 | **2** | **Target Grid** | `FN31pr` | 6-digit destination grid square. The yellow caret (`^`) marks the active character being edited. |
 | **3** | **Live Heading & Target Azimuth** | `142.6  142.8` | **Left:** Real-time antenna heading ($0.0^\circ$–$359.9^\circ$).<br>**Right:** Great-circle azimuth to target grid. |
 | **4** | **UTC Clock** | `19:45 Z` | High-precision Universal Coordinated Time derived from GNSS atomic clocks. |
@@ -119,16 +127,19 @@ Row 3 (left value) indicates the real-time physical heading of your antenna boom
 Designed by and for active VHF/UHF/Microwave operators, the compass includes specialized features for rover navigation and ARRL contest scoring.
 
 ![Rover Mode Transit Alert](docs/images/rover_transit_alert.png)
-*Photo 6 Specification: Close-up of the display showing Row 5 inverted in solid red with white text (`322.8  14 k`) indicating the operator is within the 16 km transit restriction threshold.*
+*Photo 6 Specification: Close-up of the display showing Row 5 inverted in solid red with white text (`322.8  14 k`) indicating the operator has driven 14 km from the departing rover site and remains within the 16 km transit restriction threshold.*
 
-### One-Tap Rover Grid Reset:
-* **How to Use:** When you arrive at a new rover site, simply **tap Row 1 (Local Grid)**.
-* **Action:** Instantly copies your current 6-digit grid into Row 2 (Target Grid) and records your exact benchmark coordinates.
-* **Use Case:** As you move, Row 5 now continuously displays your direct distance and bearing from your operating spot or contest grid corner.
+### One-Tap Rover Site Departure Tracking:
+* **The Rover Workflow:** When packing up and **leaving an operating site**, tap **Row 1 (Local Grid)** right as you depart.
+* **What Happens:** 
+  * Tapping Row 1 snapshots your departure coordinates and copies your 6-digit grid into Row 2 (Target Grid).
+  * It activates real-time Rover transit tracking (`rovdist = true`).
+* **En-Route Navigation:** As you drive toward your next operating location, **Row 5** continuously calculates and displays your real-time distance and reverse bearing from the site you just left.
 
 ### The 16 km Rover Transit Alert:
-* **The Rule:** Amateur radio contest rules (such as ARRL VHF/UHF) require rovers to travel at least 16 km ($~9.9\text{ miles}$) between contacts when returning to the same grid square.
-* **Visual Warning:** When Rover mode is active and distance from the origin point drops below **16 km**, Row 5 automatically inverts to **Red Background with White Text**.
+* **The Rule:** Amateur radio contest rules (such as the ARRL VHF/UHF contests) require rovers to travel at least **16 km (~9.9 miles)** between contacts when operating again from the same grid square.
+* **Visual Warning (< 16 km):** While driving away, Row 5 displays an inverted **Red Background with White Text** (e.g., `322.8  14 k`) as long as you are still within 16 km of your departure point.
+* **Transit Cleared (≥ 16 km):** The moment you cross the 16 km threshold, Row 5 automatically reverts to normal white text on black background, giving the driver/navigator instant visual confirmation that the contest distance requirement has been fulfilled.
 
 ### ARRL Contest Distance Scoring:
 * **Row 6** displays the official ARRL contest distance between grid centers.
@@ -179,7 +190,7 @@ Connecting the USB Type-C port to any PC, Mac, or terminal emulator (115,200 bau
 *Photo 9 Specification: Photo of the rear enclosure showing the 3-pin GX12 connector, USB-C jack, and label indicating pin assignments (1: Power, 2: Ground, 3: Serial RX).*
 
 ### Touch & Bezel Cheat Sheet:
-* **Tap Row 1:** Set Rover origin (copies local grid to target).
+* **Tap Row 1:** Tap when leaving a site to track departure transit distance.
 * **Tap Row 2:** Select digit in target grid for rotary editing.
 * **Rotate Bezel:** Increment / decrement active character.
 * **Wait 5s:** Automatically locks grid editing.
@@ -193,3 +204,4 @@ Connecting the USB Type-C port to any PC, Mac, or terminal emulator (115,200 bau
 | **Red Heading / `---.-`** | Stale / Lost signal (alarm watchdog active) |
 | **Red Background (Row 5)** | Rover Transit Alert ($< 16\text{ km}$ from origin) |
 | **Yellow Text / Caret** | Edit mode active |
+
