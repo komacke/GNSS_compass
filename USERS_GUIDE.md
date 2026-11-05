@@ -49,13 +49,30 @@ Operating weak-signal VHF, UHF, and microwave bands—especially portable on mou
 *Photo 2 Specification: Boom/mast installation showing the two helical or patch GNSS antennas mounted in line with the microwave dish/Yagi boom. Annotated with arrows indicating:*
 * *ANT1 (Primary / Position antenna — typically rear)*
 * *ANT2 (Secondary / Heading antenna — typically front)*
-* *Baseline distance dimension arrow ($\ge 0.5\text{ m}$ / $50\text{ cm}$)*
+* *Baseline distance dimension arrow (flexible baseline, e.g. 0.3 m to 1.0 m)*
 * *Forward pointing vector aligned with RF beam axis.*
 
 ### Key Alignment Rules:
 * **Baseline Orientation:** The line from ANT1 (primary) to ANT2 (secondary) defines your $0^\circ$ baseline heading vector. Mount both antennas parallel to your RF antenna's main beam axis.
-* **Separation Distance:** Maintain the configured baseline length (typically $0.5\text{ m}$ to $1.0\text{ m}$).
+* **Separation Distance:** Spacing is flexible based on your accuracy needs (see trade-offs below).
 * **Unobstructed Sky View:** Ensure both antennas have an identical, clear view of the sky above $10^\circ$ elevation.
+
+### Antenna Spacing vs. Heading Accuracy (Baseline Flexibility)
+
+Antenna spacing is **not a hard-and-fast rule**. While the standard reference hardware build uses a 1-meter (40-inch) carbon fiber boom, operators have complete flexibility to adjust the antenna baseline to fit their vehicle roof rack, mast constraints, or portable rover package.
+
+Because GNSS heading relies on carrier-phase interferometry, the angular heading accuracy scales with the separation distance ($L$) between antenna phase centers:
+
+| Antenna Spacing ($L$) | Nominal Heading Accuracy | Typical Use Case |
+|:---|:---:|:---|
+| **1.0 m (~39 in)** | **$\sim 0.1^\circ$ – $0.2^\circ$** | **Microwave dishes (10 GHz / 24 GHz / 47 GHz):** Narrow beamwidths ($1^\circ$–$3^\circ$) demanding maximum azimuth precision. |
+| **0.5 m (~20 in)** | **$\sim 0.3^\circ$ – $0.5^\circ$** | **Balanced Rover Setup:** Great compromise between high accuracy and a compact boom footprint. |
+| **0.25 m – 0.3 m (~10–12 in)** | **$\sim 0.8^\circ$ – $1.0^\circ$** | **VHF / UHF / Portable Stations:** If you only need $\sim 1^\circ$ accuracy (e.g., 2m / 70cm / 23cm Yagis or broad-beam horns), a closer spacing is far more convenient, lightweight, and wind-resistant. |
+
+> [!TIP]
+> **Practical Minimum:** Avoid placing antennas closer than $\sim 20\text{–}25\text{ cm}$ (~8–10 inches) to prevent mutual RF coupling, near-field phase distortions, and multipath degradation between the antenna elements.
+>
+> **Receiver Configuration Reminder:** If you configure the UM982 receiver with fixed baseline constraints (`CONFIG HEADING FIXLENGTH` / `CONFIG HEADING LENGTH <length_cm> <tolerance_cm>` as described in [RECEIVER.md](RECEIVER.md#optional-fixed-baseline-distance-constraint-recommended)), ensure the length parameter matches your chosen physical spacing, or leave baseline length unconstrained so the receiver automatically measures and adapts to your physical distance.
 
 ---
 

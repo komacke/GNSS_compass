@@ -103,7 +103,7 @@ SAVECONFIG
 ## 3. Antenna Installation & Alignment
 
 * **Mounting Hardware:** Complete parts, sourcing links, and fitment tips for the 1-meter carbon fiber boom, split tube clamps, crossover mast clamp, bulkhead adapters, and RF cables are detailed in **[BOM.md Section 2 (Mast, Mounting & Hardware)](BOM.md#2-mast-mounting--hardware)**.
-* **Separation Baseline:** Mount the two tri-band antennas at least **3 feet (~1 meter)** apart (the 1m carbon fiber tube in the BOM provides this baseline). Longer baselines improve heading accuracy.
+* **Separation Baseline:** Spacing is flexible based on your accuracy requirements. The reference BOM uses a **1-meter (~3 ft)** carbon fiber boom for optimal $\sim 0.1^\circ$ to $0.2^\circ$ precision, but closer spacings (e.g., 25–50 cm) can be used if only $\sim 1^\circ$ accuracy is needed (see [USERS_GUIDE.md Section 2](USERS_GUIDE.md#antenna-spacing-vs-heading-accuracy-baseline-flexibility) for spacing vs. accuracy trade-offs). Longer baselines improve heading accuracy.
 * **Orientation:** The baseline between the antennas must be mounted **perpendicular** to the microwave antenna heading direction.
 * **180° Heading Correction:** On first power-up, if the displayed antenna heading is 180° backwards, simply swap the two antenna RF cables at the receiver (or physically swap antenna positions).
 
