@@ -772,6 +772,54 @@ bool VoiceQsoParser::parseQso(const std::string &input,
         return false;
     }
 
+    // Split speech-to-text glued tokens where trailing characters represent a band
+    // (e.g. Gboard generating "k6 ml24" -> "k6", "ml", "24" or "k6ml24" -> "k6ml", "24").
+    // In international amateur radio regulations (ITU RR Article 19.68), callsigns
+    // NEVER end in digits; suffixes must terminate in letters (or slash-rover/portable).
+    std::vector<std::string> splitWords;
+    for (const auto &word : words) {
+        std::string dummyBand, dummyCab, dummyAdif;
+        uint32_t dummyFreq = 0;
+        // If the entire word is already a valid band, keep it intact
+        if (parseBandOrFreq(word, dummyBand, dummyFreq, dummyCab, dummyAdif)) {
+            splitWords.push_back(word);
+            continue;
+        }
+
+        bool splitDone = false;
+        // Search right-to-left for a split point where prefix ends in a letter (or /R or /P)
+        // and suffix is a valid microwave band or calling frequency
+        for (size_t k = word.size(); k > 1; --k) {
+            std::string prefix = word.substr(0, k - 1);
+            std::string suffix = word.substr(k - 1);
+
+            bool validPrefixEnd = false;
+            if (!prefix.empty()) {
+                if (isalpha(static_cast<unsigned char>(prefix.back()))) {
+                    validPrefixEnd = true;
+                } else if (prefix.size() >= 2) {
+                    std::string end2 = toLower(prefix.substr(prefix.size() - 2));
+                    if (end2 == "/r" || end2 == "/p") {
+                        validPrefixEnd = true;
+                    }
+                }
+            }
+            if (!validPrefixEnd) continue;
+
+            if (parseBandOrFreq(suffix, dummyBand, dummyFreq, dummyCab, dummyAdif)) {
+                splitWords.push_back(prefix);
+                splitWords.push_back(suffix);
+                splitDone = true;
+                break;
+            }
+        }
+
+        if (!splitDone) {
+            splitWords.push_back(word);
+        }
+    }
+    words = std::move(splitWords);
+
     // Combine adjacent tokens like ["10", "ghz"] or ["stroke", "rover"]
     std::vector<std::string> combinedWords;
     for (size_t i = 0; i < words.size(); ++i) {

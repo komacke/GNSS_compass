@@ -4109,6 +4109,46 @@ void test_voice_qso_parser() {
     ASSERT_STR_EQ(q.callsign.c_str(), "W6OP/P");
     ASSERT_STR_EQ(q.band.c_str(), "24 GHz");
 
+    // Gboard & speech recognition glued token edge cases:
+    // Speech engine separating callsign and attaching band to suffix (e.g. "k6 ml24" or "k6ml24")
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log k6 ml24", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K6ML");
+    ASSERT_STR_EQ(q.band.c_str(), "24 GHz");
+
+    // Other call areas: "k5 ml24", "k1 ml24", "w0 op10", "n7 mg47"
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log k5 ml24", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K5ML");
+    ASSERT_STR_EQ(q.band.c_str(), "24 GHz");
+
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log k1 ml24", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K1ML");
+    ASSERT_STR_EQ(q.band.c_str(), "24 GHz");
+
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log w0 op10", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "W0OP");
+    ASSERT_STR_EQ(q.band.c_str(), "10 GHz");
+
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log n7 mg47", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "N7MG");
+    ASSERT_STR_EQ(q.band.c_str(), "47 GHz");
+
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log k6ml24", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K6ML");
+    ASSERT_STR_EQ(q.band.c_str(), "24 GHz");
+
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log w6 op10", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "W6OP");
+    ASSERT_STR_EQ(q.band.c_str(), "10 GHz");
+
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log k6 mg10368.1", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K6MG");
+    ASSERT_STR_EQ(q.band.c_str(), "10 GHz");
+    ASSERT_TRUE(q.freq_khz == 10368100);
+
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log k6ml/r24", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K6ML/R");
+    ASSERT_STR_EQ(q.band.c_str(), "24 GHz");
+
     // Invalid & incomplete inputs
     ASSERT_TRUE(!VoiceQsoParser::parseQso("log", q));
     ASSERT_STR_EQ(q.error_message.c_str(), "Missing callsign");
