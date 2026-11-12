@@ -12,8 +12,9 @@ Once you have the binary file from either option, proceed to the **[Firmware Ins
 ## Option A: Download Pre-Compiled Binary (Recommended)
 
 1. Go to the repository's [Releases](https://github.com/cwiskng-max/GNSS_compass/releases) page.
-2. Under the latest release, download the following two files:
+2. Under the latest release, download the following files:
    * [**`gps_compass.ino.esp32s3.bin`**](https://github.com/cwiskng-max/GNSS_compass/releases/latest/download/gps_compass.ino.esp32s3.bin) (the compiled application firmware)
+   * [**`gps_compass.ino.partitions.bin`**](https://github.com/cwiskng-max/GNSS_compass/releases/latest/download/gps_compass.ino.partitions.bin) (the 16MB flash partition table)
    * [**`CHECKSUMS`**](https://github.com/cwiskng-max/GNSS_compass/releases/latest/download/CHECKSUMS) (SHA-256 verification hashes)
 
 3. *(Optional but Recommended)* Verify the downloaded file integrity in your terminal:
@@ -23,6 +24,7 @@ Once you have the binary file from either option, proceed to the **[Firmware Ins
    Confirm the output reports:
    ```text
    gps_compass.ino.esp32s3.bin: OK
+   gps_compass.ino.partitions.bin: OK
    ```
 
 4. **Next Step:** You have your firmware binary. Proceed to the **[Firmware Installation Guide](INSTALL.md)** to flash it.
@@ -109,7 +111,7 @@ Arduino CLI requires sketches to reside inside a folder matching the sketch name
 
 ```bash
 mkdir -p build/gps_compass
-cp -r gps_compass.ino src build/gps_compass/
+cp -r gps_compass.ino partitions.csv src build/gps_compass/
 ```
 
 *(Optional) Set a custom version identifier displayed on the screen footer:*
@@ -122,14 +124,16 @@ Compile and export the binary artifacts:
 arduino-cli compile --fqbn esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,CDCOnBoot=cdc --export-binaries build/gps_compass
 ```
 
-Your compiled application binary will be located at:
+Your compiled application and partition binaries will be located at:
 ```text
 build/gps_compass/build/esp32.esp32.esp32s3/gps_compass.ino.bin
+build/gps_compass/build/esp32.esp32.esp32s3/gps_compass.ino.partitions.bin
 ```
 
-Copy or rename it to `gps_compass.ino.esp32s3.bin`:
+Copy them to the repository root:
 ```bash
 cp build/gps_compass/build/esp32.esp32.esp32s3/gps_compass.ino.bin ./gps_compass.ino.esp32s3.bin
+cp build/gps_compass/build/esp32.esp32.esp32s3/gps_compass.ino.partitions.bin ./gps_compass.ino.partitions.bin
 ```
 
 Clean up temporary build files when done:

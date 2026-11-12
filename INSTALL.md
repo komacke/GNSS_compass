@@ -11,7 +11,7 @@ This guide covers flashing the firmware binary ([`gps_compass.ino.esp32s3.bin`](
 
 * **Hardware:** [Elecrow 2.1" ESP32 Rotary Display](BOM.md) (ESP32-S3 with 16MB Flash / 8MB OPI PSRAM).
 * **Cable:** USB Type-C data cable (ensure it supports data transfer, not power-only).
-* **Firmware Binary:** [`gps_compass.ino.esp32s3.bin`](https://github.com/cwiskng-max/GNSS_compass/releases/latest/download/gps_compass.ino.esp32s3.bin) present on your computer (acquired via [FIRMWARE.md](FIRMWARE.md)).
+* **Firmware & Partition Binaries:** [`gps_compass.ino.esp32s3.bin`](https://github.com/cwiskng-max/GNSS_compass/releases/latest/download/gps_compass.ino.esp32s3.bin) and [`gps_compass.ino.partitions.bin`](https://github.com/cwiskng-max/GNSS_compass/releases/latest/download/gps_compass.ino.partitions.bin) present on your computer (acquired via [FIRMWARE.md](FIRMWARE.md)).
 
 ---
 
@@ -47,16 +47,25 @@ The ESP32-S3 native USB CDC interface typically enumerates as:
 *(If your board uses an external USB-to-UART bridge, it may appear as `/dev/ttyUSB0` instead).*
 
 ### Step 4: Flash Firmware
-Run `esptool` to flash the binary to the application partition offset (`0x10000`):
+Run `esptool` to flash both the 16MB partition table (at `0x8000`) and the application binary (at `0x100000`):
 
 ```bash
-esptool --chip esp32s3 -p /dev/ttyACM0 -b 921600 write_flash 0x10000 gps_compass.ino.esp32s3.bin
+esptool --chip esp32s3 -p /dev/ttyACM0 -b 921600 write_flash \
+    0x8000 gps_compass.ino.partitions.bin \
+    0x100000 gps_compass.ino.esp32s3.bin
 ```
 
 * `--chip esp32s3`: Targets the ESP32-S3 microcontroller.
 * `-p /dev/ttyACM0`: Specifies your serial port (adjust if yours is `/dev/ttyACM1` or `/dev/ttyUSB0`).
 * `-b 921600`: High-speed baud rate for fast transfer (you can fall back to `460800` or `115200` if your cable experiences errors).
-* `0x10000`: Flash offset for the application image in the default partition table.
+* `0x8000`: Flash offset for the custom 16MB partition table.
+* `0x100000`: Flash offset for the application image (starts at 1.0 MB, reserving 512 KB for high-capacity NVS logging and settings).
+
+> [!TIP]
+> Once the board has been partitioned with the 16MB layout, future application-only firmware updates can simply flash the single binary directly:
+> ```bash
+> esptool --chip esp32s3 -p /dev/ttyACM0 -b 921600 write_flash 0x100000 gps_compass.ino.esp32s3.bin
+> ```
 
 ### Bootloader Mode Troubleshooting
 The board usually resets into the ROM bootloader automatically. If `esptool` reports `A fatal error occurred: Failed to connect to ESP32-S3: No serial data received`:
@@ -85,7 +94,9 @@ The board usually resets into the ROM bootloader automatically. If `esptool` rep
 3. Connect the board and identify the device (`/dev/ttyACM0` or `/dev/ttyUSB0`).
 4. Flash using:
    ```bash
-   esptool --chip esp32s3 -p /dev/ttyACM0 -b 921600 write_flash 0x10000 gps_compass.ino.esp32s3.bin
+   esptool --chip esp32s3 -p /dev/ttyACM0 -b 921600 write_flash \
+       0x8000 gps_compass.ino.partitions.bin \
+       0x100000 gps_compass.ino.esp32s3.bin
    ```
 
 ### macOS & Windows (via Python / pip)
@@ -104,14 +115,16 @@ On systems without a native package manager package for `esptool`, install it vi
      ```
    * Flash:
      ```bash
-     esptool.py --chip esp32s3 -p /dev/cu.usbmodemXXXX -b 921600 write_flash 0x10000 gps_compass.ino.esp32s3.bin
+     esptool.py --chip esp32s3 -p /dev/cu.usbmodemXXXX -b 921600 write_flash \
+         0x8000 gps_compass.ino.partitions.bin \
+         0x100000 gps_compass.ino.esp32s3.bin
      ```
 
 3. **Windows Port:**
    * Open **Device Manager** and expand **Ports (COM & LPT)** to find the assigned COM port (e.g., `COM3`, `COM4`).
    * Open Command Prompt or PowerShell and flash:
      ```cmd
-     esptool --chip esp32s3 -p COM3 -b 921600 write_flash 0x10000 gps_compass.ino.esp32s3.bin
+     esptool --chip esp32s3 -p COM3 -b 921600 write_flash 0x8000 gps_compass.ino.partitions.bin 0x100000 gps_compass.ino.esp32s3.bin
      ```
 
 ---

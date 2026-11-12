@@ -13,6 +13,7 @@ fi
 BUILD_DIR="$REPO_ROOT/build"
 SCRATCH_DIR="$BUILD_DIR/tmp/gps_compass"
 OUTPUT_BIN="$REPO_ROOT/gps_compass.ino.esp32s3.bin"
+PARTITIONS_BIN="$REPO_ROOT/gps_compass.ino.partitions.bin"
 SERIAL_PORT="${SERIAL_PORT:-/dev/ttyACM0}"
 
 echo "Building the binary..."
@@ -21,7 +22,7 @@ echo
 # Prepare scratch folder for arduino-cli
 rm -rf "$SCRATCH_DIR"
 mkdir -p "$SCRATCH_DIR"
-cp -r "$REPO_ROOT/gps_compass.ino" "$REPO_ROOT/src" "$SCRATCH_DIR/"
+cp -r "$REPO_ROOT/gps_compass.ino" "$REPO_ROOT/partitions.csv" "$REPO_ROOT/src" "$SCRATCH_DIR/"
 
 # Inject Git short hash into scratch config.h for local dev identification
 GIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || echo 'dev')"
@@ -40,6 +41,9 @@ arduino-cli compile \
 if [ -f "$BUILD_DIR/gps_compass.ino.bin" ]; then
     cp "$BUILD_DIR/gps_compass.ino.bin" "$OUTPUT_BIN"
 fi
+if [ -f "$BUILD_DIR/gps_compass.ino.partitions.bin" ]; then
+    cp "$BUILD_DIR/gps_compass.ino.partitions.bin" "$PARTITIONS_BIN"
+fi
 
 # Clean ONLY intermediate compiler artifacts; preserve build/ and this script!
 rm -rf "$BUILD_DIR/tmp" \
@@ -51,7 +55,10 @@ rm -rf "$BUILD_DIR/tmp" \
 
 if [ -f "$OUTPUT_BIN" ]; then
     echo
-    echo "The binary is in the root folder named: $(basename "$OUTPUT_BIN")"
+    echo "Firmware binary:   $(basename "$OUTPUT_BIN")"
+    if [ -f "$PARTITIONS_BIN" ]; then
+        echo "Partition table:   $(basename "$PARTITIONS_BIN")"
+    fi
 else
     echo "Something went wrong. There's no binary here."
     exit 1
@@ -63,7 +70,11 @@ resp="${resp,,}"
 resp="${resp:-y}"
 
 if [[ "$resp" == "y" ]]; then
-    esptool --chip esp32s3 --port "$SERIAL_PORT" --baud 921600 write-flash 0x10000 "$OUTPUT_BIN"
+    if [ -f "$PARTITIONS_BIN" ]; then
+        esptool --chip esp32s3 --port "$SERIAL_PORT" --baud 921600 write-flash 0x8000 "$PARTITIONS_BIN" 0x100000 "$OUTPUT_BIN"
+    else
+        esptool --chip esp32s3 --port "$SERIAL_PORT" --baud 921600 write-flash 0x100000 "$OUTPUT_BIN"
+    fi
 else
     echo "Skipping install."
 fi
