@@ -20,7 +20,7 @@ Operating in these environments imposes extreme physical constraints:
 ```
                       ┌──────────────────────────────────────────────┐
                       │    Smartphone (Voice Dictation / Gboard)     │
-                      │   "log n9dk 10"  or  "target CM88qk"         │
+                      │   "log k6mg 10"  or  "target CM88qk"         │
                       └───────────────────────┬──────────────────────┘
                                               │ BLE UART (NUS)
                                               ▼
@@ -30,7 +30,7 @@ Operating in these environments imposes extreme physical constraints:
 │   ┌─────────────────────┐       ┌───────────────────────────────────────────┐   │
 │   │   LineBuffer / BLE  │  ──>  │      VoiceQsoParser                       │   │
 │   └─────────────────────┘       │  - Strips dictation punctuation           │   │
-│                                 │  - NATO phonetics ("November 9 Delta...") │   │
+│                                 │  - NATO phonetics ("Kilo 6 Mike Golf...") │   │
 │                                 │  - Disambiguates without requiring "GHz"  │   │
 │                                 │  - Flexible order (call first / band 1st) │   │
 │                                 │  - Freq -> Band auto-mapping (10368->10G) │   │
@@ -63,7 +63,7 @@ The GNSS Compass already continuously computes and maintains the critical situat
 4. **Geodesics:** Exact geodesic path distance (km) and true bearing (azimuth).
 
 By combining the **Bluetooth Serial Interface (BLE UART)** with the voice dictation built into modern smartphone keyboards (Google Gboard, Apple iOS Dictation), the operator can simply tap the microphone icon in their mobile terminal and speak single natural commands like:
-> **"log n9dk"** $\rightarrow$ **Instantly logged to 10 GHz with on-display visual confirmation!**
+> **"log k6mg"** $\rightarrow$ **Instantly logged to 10 GHz with on-display visual confirmation!**
 
 ---
 
@@ -106,10 +106,10 @@ stateDiagram-v2
 When complete arguments are provided, the QSO is **immediately committed to persistent storage** without requiring a second "save" confirmation word:
 
 #### Example 1: Default 10 GHz Band (A Single Spoken Phrase)
-* **Operator speaks:** `"log n9dk"`
+* **Operator speaks:** `"log k6mg"`
 * **Compass terminal echoes:**
   ```text
-  [QSO LOGGED #15] N9DK | 10 GHz (10368.100 MHz) | 21:34z | CM87wa -> CM88qk (118.2 km @ 342 deg)
+  [QSO LOGGED #15] K6MG | 10 GHz (10368.100 MHz) | 21:34z | CM87wa -> CM88qk (118.2 km @ 342 deg)
   > 
   ```
 * **Compass 2.1" Display:** Instantly shows the **QSO Pop-Up Card** on the LCD screen (described in Section 3) with a 10-second auto-dismiss timer.
@@ -117,18 +117,18 @@ When complete arguments are provided, the QSO is **immediately committed to pers
 
 #### Example 2: Band Specified Without "GHz"
 The suffix `"GHz"` is **not required**. Numbers like `10`, `24`, `47`, `76`, etc., are automatically recognized as microwave gigahertz bands:
-* **Operator speaks:** `"log n9dk 24"` *(or reversed: `"log 24 n9dk"`)*
+* **Operator speaks:** `"log k6mg 24"` *(or reversed: `"log 24 k6mg"`)*
 * **Compass terminal echoes:**
   ```text
-  [QSO LOGGED #16] N9DK | 24 GHz (24192.100 MHz) | 21:35z | CM87wa -> CM88qk (118.2 km @ 342 deg)
+  [QSO LOGGED #16] K6MG | 24 GHz (24192.100 MHz) | 21:35z | CM87wa -> CM88qk (118.2 km @ 342 deg)
   > 
   ```
 
 #### Example 3: Exact Frequency in Digits
-* **Operator speaks:** `"log n9dk 10368.1"` *(or `"log 10368.100 n9dk"`)*
+* **Operator speaks:** `"log k6mg 10368.1"` *(or `"log 10368.100 k6mg"`)*
 * **Compass terminal echoes:**
   ```text
-  [QSO LOGGED #17] N9DK | 10 GHz (10368.100 MHz) | 21:36z | CM87wa -> CM88qk (118.2 km @ 342 deg)
+  [QSO LOGGED #17] K6MG | 10 GHz (10368.100 MHz) | 21:36z | CM87wa -> CM88qk (118.2 km @ 342 deg)
   > 
   ```
 
@@ -142,7 +142,7 @@ Because contacts are logged immediately, field error correction is simple:
    * If an accidental contact was logged:
      ```text
      > log undo
-     [QSO LOG] Removed last entry #17 (N9DK on 10 GHz). Log contains 16 contacts.
+     [QSO LOG] Removed last entry #17 (K6MG on 10 GHz). Log contains 16 contacts.
      ```
 2. **Delete by Number (`log delete <#>` or `log del <#>`):**
    * If a previous entry needs to be removed:
@@ -159,13 +159,13 @@ If the operator issues an incomplete command (e.g. just `"log"`):
 * **Operator speaks:** `"log"`
 * **Compass replies:**
   ```text
-  [QSO] Callsign? (e.g. 'N9DK' or 'November Nine Delta Kilo', or 'cancel')
+  [QSO] Callsign? (e.g. 'K6MG' or 'Kilo Six Mike Golf', or 'cancel')
   > 
   ```
-* **Operator speaks:** `"n9dk"`
+* **Operator speaks:** `"k6mg"`
 * **Compass immediately completes and saves:**
   ```text
-  [QSO LOGGED #18] N9DK | 10 GHz [Default] | 21:38z | CM87wa -> CM88qk (118.2 km @ 342 deg)
+  [QSO LOGGED #18] K6MG | 10 GHz [Default] | 21:38z | CM87wa -> CM88qk (118.2 km @ 342 deg)
   > 
   ```
 * **Hotword "cancel":** Saying `"cancel"` at any prompt immediately aborts without logging.
@@ -201,7 +201,7 @@ To allow the operator to verify logging while looking at the mast/tripod display
 │               ┌─────────────────────────┐               │
 │               │     *** QSO LOGGED ***  │               │
 │               │                         │               │
-│               │        N9DK / R         │  (Large Text) │
+│               │        K6MG / R         │  (Large Text) │
 │               │                         │               │
 │               │   10 GHz (10368.100)    │               │
 │               │   CM88qk  -  118.2 km   │               │
@@ -264,7 +264,7 @@ Microwave contesting spans from 10 GHz up into the millimeter and sub-millimeter
 The `VoiceQsoParser` processes input through a flexible normalization pipeline:
 
 1. **Punctuation Stripping:** Commas, colons, question marks, and trailing periods inserted by smartphone keyboards are stripped, while preserving internal decimal points (`10368.1`, `5.7`, `77.5`).
-2. **NATO Phonetic Translation:** Words like `"November Nine Delta Kilo"` collapse into `N9DK`.
+2. **NATO Phonetic Translation:** Words like `"Kilo Six Mike Golf"` collapse into `K6MG`.
 3. **Phonetic Grid Parsing for `target`:** `"charlie mike 88 quebec kilo"` collapses into `CM88qk`.
 4. **Spoken Numbers & Homophones:** Words like `"zero"` $\rightarrow$ `0`, `"won"`/`"one"` $\rightarrow$ `1`, `"to"`/`"too"`/`"two"` $\rightarrow$ `2`, `"for"`/`"four"` $\rightarrow$ `4`, `"ate"`/`"eight"` $\rightarrow$ `8`.
 5. **Suffixes:** `"stroke rover"`, `"slash rover"`, `"rover"` $\rightarrow$ `/R`; `"portable"` $\rightarrow$ `/P`.
@@ -285,7 +285,7 @@ QSO entries are stored in the ESP32-S3 non-volatile storage (NVS) using `Prefere
 #pragma pack(push, 1)
 struct QsoEntry {
     uint32_t timestamp;        // GPS UTC epoch timestamp (seconds)
-    char     callsign[12];     // Target callsign (e.g. "N9DK/R\0")
+    char     callsign[12];     // Target callsign (e.g. "K6MG/R\0")
     char     band[8];          // Band identifier (e.g. "10 GHz\0")
     uint32_t freq_khz;         // Frequency in kHz (e.g. 10368100), 0 if band-only
     char     my_grid[9];       // Operator Maidenhead grid at QSO time (e.g. "CM87wa\0")
@@ -296,8 +296,8 @@ struct QsoEntry {
 #pragma pack(pop)
 ```
 
-* **Size per Entry:** Exactly **48 bytes**.
-* **Capacity:** Default 100 QSOs (configurable up to 500, ~22 KB in NVS flash).
+* **Size per Entry:** Exactly **54 bytes**.
+* **Capacity:** Default 200 QSOs (configurable up to 1000, ~54 KB in NVS flash).
 * **NVS Endurance:** Over 100,000 write cycles; negligible wear in field use.
 
 ---
@@ -308,8 +308,8 @@ All commands operate identically over **Bluetooth Low Energy (BLE)** and **USB S
 
 | Command | Examples / Spoken Variants | Function |
 | :--- | :--- | :--- |
-| `log <call> [band/freq]` | `"log n9dk 10"`, `"log 24 n9dk"`, `"log n9dk 10368.1"` | Immediately logs QSO to NVS and shows pop-up card |
-| `log <call>` | `"log n9dk"`, `"log november 9 delta kilo"` | Immediately logs QSO with default band (10 GHz) |
+| `log <call> [band/freq]` | `"log k6mg 10"`, `"log 24 k6mg"`, `"log k6mg 10368.1"` | Immediately logs QSO to NVS and shows pop-up card |
+| `log <call>` | `"log k6mg"`, `"log kilo six mike golf"` | Immediately logs QSO with default band (10 GHz) |
 | `log undo` | `"log undo"` | Deletes the most recent QSO entry |
 | `log delete <#>` | `"log delete 3"`, `"log del 14"` | Deletes specific QSO by index and re-indexes |
 | `log clear` | `"log clear"` | Prompts confirmation to wipe log |

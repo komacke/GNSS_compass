@@ -18,6 +18,7 @@ typedef void (*CliStateChangedCallback)(void *context);
 typedef void (*CliRoverSimCallback)(const char *originGrid, double distKm, void *context);
 typedef void (*CliRoverActionCallback)(void *context, unsigned long nowMs);
 typedef void (*CliRestartCallback)(void *context);
+typedef void (*CliTargetGridCallback)(const char *grid, unsigned long nowMs, void *context);
 
 /**
  * @brief Input source of the CLI command
@@ -40,6 +41,7 @@ struct CliNavContext {
     double originLon = 0.0;
     char originGrid[9] = {0};
     char currentGrid[9] = {0};
+    char targetGrid[9] = {0};
     RoverState roverState = RoverState::InTransitUnder16k;
     double lastValidDisplacementKm = 0.0;
     bool isGpsFresh = false;
@@ -117,6 +119,7 @@ public:
     }
     void setOriginGrid(const char *grid);
     void setCurrentGrid(const char *grid);
+    void setTargetGrid(const char *grid);
     void setRoverState(RoverState state) { fallbackNavContext_.roverState = state; }
     void setLastValidDisplacementKm(double km) { fallbackNavContext_.lastValidDisplacementKm = km; }
     void setGpsFresh(bool fresh) { fallbackNavContext_.isGpsFresh = fresh; }
@@ -135,6 +138,11 @@ public:
         roverActionContext_ = context;
     }
 
+    void setTargetGridCallback(CliTargetGridCallback cb, void *context = nullptr) {
+        targetGridCb_ = cb;
+        targetGridContext_ = context;
+    }
+
     // Formatted diagnostic reports
     void printHelp();
     void printGpsStatus(unsigned long nowMs = 0);
@@ -144,6 +152,7 @@ public:
     void printRoverHistory();
     void printRoverHelp();
     void printPrompt();
+    void handleTargetCommand(const char *arg, unsigned long nowMs = 0);
 
     // Receiver audit query & parsing
     struct GpsAuditState {
@@ -243,6 +252,8 @@ private:
     CliRoverActionCallback roverStopCb_;
     CliRoverActionCallback roverUndoCb_;
     void *roverActionContext_;
+    CliTargetGridCallback targetGridCb_;
+    void *targetGridContext_;
     CliCommandOutputFn outputFn_;
     void *outputContext_;
     CliRestartCallback restartCb_;

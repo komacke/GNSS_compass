@@ -85,7 +85,7 @@ public:
     GridEditor& getGridEditor() { return gridEditor_; }
     const GridEditor& getGridEditor() const { return gridEditor_; }
     const char* getTargetGrid() const { return gridEditor_.getGrid(); }
-    void setTargetGrid(const char *grid);
+    void setTargetGrid(const char *grid, unsigned long nowMs = 0);
 
     const char* getMyGrid() const { return myGrid_; }
     void setMyGrid(const char *grid);

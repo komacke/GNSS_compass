@@ -20,6 +20,9 @@
 #include "../src/system/board.h"
 #include "../src/system/app_controller.h"
 #include "../src/system/rover_log_manager.h"
+#include "../src/system/qso_entry.h"
+#include "../src/system/qso_log_manager.h"
+#include "../src/protocol/voice_qso_parser.h"
 #include "../src/protocol/ble_serial_manager.h"
 #include "../src/protocol/line_buffer.h"
 #include "../src/protocol/text_output.h"
@@ -3930,6 +3933,523 @@ void test_app_controller_ble_integration() {
     PASS();
 }
 
+void test_voice_qso_parser() {
+    TEST("VoiceQsoParser phonetics, homophones, band deduction, and QSO decoding");
+
+    // 1. Punctuation stripping
+    std::string s1 = VoiceQsoParser::stripPunctuation("log, k6mg, 10.");
+    ASSERT_TRUE(s1.find(',') == std::string::npos);
+    ASSERT_TRUE(s1.find('.') == std::string::npos);
+
+    // Internal decimal points must be preserved
+    std::string s2 = VoiceQsoParser::stripPunctuation("log k6mg 10368.1. w6op 5.7, 77.5!");
+    ASSERT_TRUE(s2.find("10368.1") != std::string::npos);
+    ASSERT_TRUE(s2.find("5.7") != std::string::npos);
+    ASSERT_TRUE(s2.find("77.5") != std::string::npos);
+    ASSERT_TRUE(s2.find('!') == std::string::npos);
+
+    // 2. NATO phonetics and spoken numbers normalization
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("kilo six mike golf").c_str(), "K6MG");
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("kilo 6 mike golf").c_str(), "K6MG");
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("kilo six mike golf stroke rover").c_str(), "K6MG/R");
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("whiskey six oscar papa stroke rover").c_str(), "W6OP/R");
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("w6op slash rover").c_str(), "W6OP/R");
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("w6op rover").c_str(), "W6OP/R");
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("w6op portable").c_str(), "W6OP/P");
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("w6op slash portable").c_str(), "W6OP/P");
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("kilo six echo mike echo").c_str(), "K6EME");
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("zero won to three for five six seven ate niner").c_str(), "0123456789");
+    ASSERT_STR_EQ(VoiceQsoParser::normalizeVoiceInput("one two too four eight nine").c_str(), "122489");
+
+    // 3. Band and frequency deduction without requiring "GHz"
+    std::string band, cabrillo, adif;
+    uint32_t freq_khz = 0;
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("10", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "10 GHz");
+    ASSERT_TRUE(freq_khz == 10368100);
+    ASSERT_STR_EQ(cabrillo.c_str(), "10G");
+    ASSERT_STR_EQ(adif.c_str(), "3cm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("24", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "24 GHz");
+    ASSERT_TRUE(freq_khz == 24192100);
+    ASSERT_STR_EQ(cabrillo.c_str(), "24G");
+    ASSERT_STR_EQ(adif.c_str(), "1.2cm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("47", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "47 GHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "47G");
+    ASSERT_STR_EQ(adif.c_str(), "6mm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("76", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "76 GHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "76G");
+    ASSERT_STR_EQ(adif.c_str(), "4mm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("77.5", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "76 GHz");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("122", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "122 GHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "122G");
+    ASSERT_STR_EQ(adif.c_str(), "2.5mm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("134", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "134 GHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "134G");
+    ASSERT_STR_EQ(adif.c_str(), "2mm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("241", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "241 GHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "241G");
+    ASSERT_STR_EQ(adif.c_str(), "1mm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("light", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "LIGHT");
+    ASSERT_STR_EQ(cabrillo.c_str(), "LIGHT");
+    ASSERT_STR_EQ(adif.c_str(), "submm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("laser", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "LIGHT");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("5.7", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "5.7 GHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "5.7G");
+    ASSERT_STR_EQ(adif.c_str(), "6cm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("3.4", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "3.4 GHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "3.4G");
+    ASSERT_STR_EQ(adif.c_str(), "9cm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("2.3", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "2.3 GHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "2.3G");
+    ASSERT_STR_EQ(adif.c_str(), "13cm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("1.2", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "1.2 GHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "1.2G");
+    ASSERT_STR_EQ(adif.c_str(), "23cm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("902", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "902 MHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "902");
+    ASSERT_STR_EQ(adif.c_str(), "33cm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("432", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "432 MHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "432");
+    ASSERT_STR_EQ(adif.c_str(), "70cm");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("222", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "222 MHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "222");
+    ASSERT_STR_EQ(adif.c_str(), "1.25m");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("144", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "144 MHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "144");
+    ASSERT_STR_EQ(adif.c_str(), "2m");
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("50", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "50 MHz");
+    ASSERT_STR_EQ(cabrillo.c_str(), "50");
+    ASSERT_STR_EQ(adif.c_str(), "6m");
+
+    // Exact frequency mapping
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("10368.1", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "10 GHz");
+    ASSERT_TRUE(freq_khz == 10368100);
+
+    ASSERT_TRUE(VoiceQsoParser::parseBandOrFreq("24192.100", band, freq_khz, cabrillo, adif));
+    ASSERT_STR_EQ(band.c_str(), "24 GHz");
+    ASSERT_TRUE(freq_khz == 24192100);
+
+    // 4. Full QSO parser
+    ParsedQso q;
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log k6mg 10", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K6MG");
+    ASSERT_STR_EQ(q.band.c_str(), "10 GHz");
+    ASSERT_TRUE(q.freq_khz == 10368100);
+
+    // Flexible order (band first)
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log 24 k6mg", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K6MG");
+    ASSERT_STR_EQ(q.band.c_str(), "24 GHz");
+
+    // Exact frequency in QSO
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log k6mg 10368.1", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K6MG");
+    ASSERT_STR_EQ(q.band.c_str(), "10 GHz");
+    ASSERT_TRUE(q.freq_khz == 10368100);
+
+    // Default band (10 GHz) when no band provided
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log k6mg", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K6MG");
+    ASSERT_STR_EQ(q.band.c_str(), "10 GHz");
+    ASSERT_TRUE(q.freq_khz == 10368100);
+
+    // Direct without "log" prefix
+    ASSERT_TRUE(VoiceQsoParser::parseQso("k6mg", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K6MG");
+    ASSERT_STR_EQ(q.band.c_str(), "10 GHz");
+
+    // Phonetic callsign + suffix + band
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log kilo six mike golf stroke rover 47", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "K6MG/R");
+    ASSERT_STR_EQ(q.band.c_str(), "47 GHz");
+
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log w6op / r 122", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "W6OP/R");
+    ASSERT_STR_EQ(q.band.c_str(), "122 GHz");
+
+    ASSERT_TRUE(VoiceQsoParser::parseQso("log w6op portable 24", q));
+    ASSERT_STR_EQ(q.callsign.c_str(), "W6OP/P");
+    ASSERT_STR_EQ(q.band.c_str(), "24 GHz");
+
+    // Invalid & incomplete inputs
+    ASSERT_TRUE(!VoiceQsoParser::parseQso("log", q));
+    ASSERT_STR_EQ(q.error_message.c_str(), "Missing callsign");
+
+    ASSERT_TRUE(!VoiceQsoParser::parseQso("log 10", q));
+    ASSERT_STR_EQ(q.error_message.c_str(), "Missing callsign");
+
+    ASSERT_TRUE(!VoiceQsoParser::parseQso("", q));
+    ASSERT_TRUE(!VoiceQsoParser::parseQso("log 12345 10", q)); // No letters
+    ASSERT_TRUE(!VoiceQsoParser::parseQso("log ABCDEF 10", q)); // No digits
+    ASSERT_TRUE(!VoiceQsoParser::parseQso("log N9 10", q));     // Too short
+
+    PASS();
+}
+
+void test_voice_maidenhead_grid_parser() {
+    TEST("VoiceQsoParser Maidenhead grid parsing (plain and NATO phonetics)");
+
+    std::string grid;
+    // Plain text
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("CM88qk", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM88qk");
+
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("cm88qk", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM88qk");
+
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("CM88", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM88");
+
+    // NATO phonetics
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("charlie mike 88 quebec kilo", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM88qk");
+
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("charlie mike eight eight quebec kilo", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM88qk");
+
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("c m 8 8 q k", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM88qk");
+
+    // Gboard voice dictation variants: compound digits, tens/teens, "beta" for B
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("Target Charlie Mike 87 alpha beta", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM87ab");
+
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("Target Charlie Mike eighty seven alpha beta", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM87ab");
+
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("Target Charlie Mike eighty-seven alpha beta", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM87ab");
+
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("Target Charlie Mike eighty alpha bravo", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM80ab");
+
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("target charlie mike twelve alpha beta", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM12ab");
+
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("target CM 87 ab", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM87ab");
+
+    // With leading "target" keyword
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("target CM88qk", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM88qk");
+
+    ASSERT_TRUE(VoiceQsoParser::parseGrid("target charlie mike 88 quebec kilo", grid));
+    ASSERT_STR_EQ(grid.c_str(), "CM88qk");
+
+    // Invalid grids
+    ASSERT_TRUE(!VoiceQsoParser::parseGrid("ZZ99", grid)); // Out of bounds field
+    ASSERT_TRUE(!VoiceQsoParser::parseGrid("foo", grid));
+    ASSERT_TRUE(!VoiceQsoParser::parseGrid("1234", grid));
+    ASSERT_TRUE(!VoiceQsoParser::parseGrid("", grid));
+
+    PASS();
+}
+
+void test_qso_entry_and_log_manager() {
+    TEST("QsoEntry struct packing, QsoLogManager ring buffer, delete-by-index, and NVS");
+
+    // Struct packing validation
+    ASSERT_TRUE(sizeof(QsoEntry) == 54);
+
+    QsoEntry q1(1789853640, "K6MG/R", "10 GHz", 10368100, "CM87wa", "CM88qk", 118.2f, 342.3f);
+    ASSERT_TRUE(q1.timestamp == 1789853640);
+    ASSERT_STR_EQ(q1.callsign, "K6MG/R");
+    ASSERT_STR_EQ(q1.band, "10 GHz");
+    ASSERT_TRUE(q1.freq_khz == 10368100);
+    ASSERT_STR_EQ(q1.my_grid, "CM87wa");
+    ASSERT_STR_EQ(q1.his_grid, "CM88qk");
+    ASSERT_NEAR(q1.distance_km, 118.2f, 0.01f);
+    ASSERT_NEAR(q1.bearing_deg, 342.3f, 0.01f);
+
+    QsoEntry q1_copy = q1;
+    ASSERT_TRUE(q1 == q1_copy);
+    q1_copy.distance_km += 1.0f;
+    ASSERT_TRUE(q1 != q1_copy);
+
+    // QsoLogManager basic stack operations
+    QsoLogManager::resetHostStorage();
+    QsoLogManager mgr;
+    mgr.begin();
+    ASSERT_TRUE(mgr.isEmpty());
+    ASSERT_TRUE(mgr.getQsoCount() == 0);
+    ASSERT_TRUE(mgr.getMaxQsos() == 200);
+    ASSERT_TRUE(QsoLogManager::clampMaxQsos(5000) == 1000);
+    ASSERT_TRUE(QsoLogManager::clampMaxQsos(5) == 10);
+
+    QsoEntry q2(1789853700, "W6OP/R", "24 GHz", 24192100, "CM87wa", "CM88qk", 118.2f, 342.3f);
+    QsoEntry q3(1789853760, "K6EME", "47 GHz", 47088100, "CM87wa", "CM97aa", 85.5f, 85.0f);
+
+    mgr.appendQso(q1);
+    mgr.appendQso(q2);
+    mgr.appendQso(q3);
+    ASSERT_TRUE(mgr.getQsoCount() == 3);
+    ASSERT_TRUE(!mgr.isEmpty());
+
+    QsoEntry lastQ;
+    ASSERT_TRUE(mgr.getLastQso(lastQ));
+    ASSERT_STR_EQ(lastQ.callsign, "K6EME");
+
+    // 1-based delete by index with re-indexing: delete #2 (W6OP/R)
+    ASSERT_TRUE(mgr.deleteQsoByIndex(2));
+    ASSERT_TRUE(mgr.getQsoCount() == 2);
+
+    // Verify re-indexing: index 0 is K6MG/R, index 1 is now K6EME
+    const QsoEntry *e0 = mgr.getQso(0);
+    const QsoEntry *e1 = mgr.getQso(1);
+    ASSERT_TRUE(e0 != nullptr);
+    ASSERT_TRUE(e1 != nullptr);
+    ASSERT_STR_EQ(e0->callsign, "K6MG/R");
+    ASSERT_STR_EQ(e1->callsign, "K6EME");
+
+    // Invalid delete indices
+    ASSERT_TRUE(!mgr.deleteQsoByIndex(0));
+    ASSERT_TRUE(!mgr.deleteQsoByIndex(3));
+
+    // Undo (popLastQso): removes K6EME
+    ASSERT_TRUE(mgr.popLastQso());
+    ASSERT_TRUE(mgr.getQsoCount() == 1);
+    ASSERT_STR_EQ(mgr.getQso(0)->callsign, "K6MG/R");
+
+    // Persistence across manager instances
+    QsoLogManager mgr2;
+    mgr2.begin();
+    ASSERT_TRUE(mgr2.getQsoCount() == 1);
+    ASSERT_STR_EQ(mgr2.getQso(0)->callsign, "K6MG/R");
+
+    // Clear log
+    mgr2.clearLog();
+    ASSERT_TRUE(mgr2.isEmpty());
+    ASSERT_TRUE(mgr2.getQsoCount() == 0);
+
+    // Re-check persistence after clear
+    QsoLogManager mgr3;
+    mgr3.begin();
+    ASSERT_TRUE(mgr3.isEmpty());
+
+    // Capacity clamping and FIFO rollover
+    mgr3.setMaxQsos(10);
+    ASSERT_TRUE(mgr3.getMaxQsos() == 10);
+    for (int i = 0; i < 15; ++i) {
+        char cbuf[12];
+        snprintf(cbuf, sizeof(cbuf), "W%dAW", i);
+        QsoEntry q(1000 + i, cbuf, "10 GHz", 10368100, "CM87wa", "CM88qk", 10.0f + i, 100.0f);
+        mgr3.appendQso(q);
+    }
+    ASSERT_TRUE(mgr3.getQsoCount() == 10);
+    // Oldest entries 0..4 discarded; first entry should be W5AW, last W14AW
+    ASSERT_STR_EQ(mgr3.getQso(0)->callsign, "W5AW");
+    ASSERT_STR_EQ(mgr3.getQso(9)->callsign, "W14AW");
+
+    PASS();
+}
+
+void test_qso_export_formatters() {
+    TEST("QsoLogManager Cabrillo, ADIF, CSV, and contest statistics formatters");
+
+    QsoLogManager::resetHostStorage();
+    QsoLogManager mgr;
+    mgr.begin();
+
+    QsoEntry q1(1789853640, "K6MG/R", "10 GHz", 10368100, "CM87wa", "CM88qk", 118.2f, 342.3f);
+    QsoEntry q2(1789853700, "W6OP/R", "24 GHz", 24192100, "CM87wa", "CM88qk", 118.2f, 342.3f);
+    QsoEntry q3(1789853760, "K6EME", "10 GHz", 10368100, "CM87wa", "CM97aa", 85.5f, 85.0f);
+
+    mgr.appendQso(q1);
+    mgr.appendQso(q2);
+    mgr.appendQso(q3);
+
+    // 1. Cabrillo 3.0 export
+    std::string cab = mgr.formatCabrillo("W6YX");
+    ASSERT_TRUE(cab.find("START-OF-LOG: 3.0") != std::string::npos);
+    ASSERT_TRUE(cab.find("CONTEST: ARRL-10-GHZ") != std::string::npos);
+    ASSERT_TRUE(cab.find("CALLSIGN: W6YX") != std::string::npos);
+    ASSERT_TRUE(cab.find("10G   PH") != std::string::npos);
+    ASSERT_TRUE(cab.find("24G   PH") != std::string::npos);
+    ASSERT_TRUE(cab.find("K6MG/R") != std::string::npos);
+    ASSERT_TRUE(cab.find("W6OP/R") != std::string::npos);
+    ASSERT_TRUE(cab.find("K6EME") != std::string::npos);
+    ASSERT_TRUE(cab.find("END-OF-LOG:") != std::string::npos);
+
+    // 2. ADIF export
+    std::string adif = mgr.formatAdif();
+    ASSERT_TRUE(adif.find("ADIF Export from GNSS Compass") != std::string::npos);
+    ASSERT_TRUE(adif.find("<ADIF_VER:5>3.1.4") != std::string::npos);
+    ASSERT_TRUE(adif.find("<EOH>") != std::string::npos);
+    ASSERT_TRUE(adif.find("<CALL:6>K6MG/R") != std::string::npos);
+    ASSERT_TRUE(adif.find("<BAND:3>3cm") != std::string::npos);
+    ASSERT_TRUE(adif.find("<FREQ:9>10368.100") != std::string::npos);
+    ASSERT_TRUE(adif.find("<BAND:5>1.2cm") != std::string::npos);
+    ASSERT_TRUE(adif.find("<FREQ:9>24192.100") != std::string::npos);
+    ASSERT_TRUE(adif.find("<MODE:3>SSB") != std::string::npos);
+    ASSERT_TRUE(adif.find("<MY_GRIDSQUARE:6>CM87wa") != std::string::npos);
+    ASSERT_TRUE(adif.find("<GRIDSQUARE:6>CM88qk") != std::string::npos);
+    ASSERT_TRUE(adif.find("<DISTANCE:5>118.2") != std::string::npos);
+    ASSERT_TRUE(adif.find("<EOR>") != std::string::npos);
+
+    // 3. CSV export
+    std::string csv = mgr.formatCsv();
+    ASSERT_TRUE(csv.find("Timestamp,Date,Time,Callsign,Band,Frequency_kHz,MyGrid,HisGrid,Distance_km,Bearing_deg") != std::string::npos);
+    ASSERT_TRUE(csv.find("K6MG/R,10 GHz,10368100,CM87wa,CM88qk,118.2,342.3") != std::string::npos);
+    ASSERT_TRUE(csv.find("W6OP/R,24 GHz,24192100,CM87wa,CM88qk,118.2,342.3") != std::string::npos);
+
+    // 4. Contest statistics calculation
+    std::string stats = mgr.formatStats();
+    ASSERT_TRUE(stats.find("Contest QSO Statistics") != std::string::npos);
+    ASSERT_TRUE(stats.find("Total QSOs:        3") != std::string::npos);
+    ASSERT_TRUE(stats.find("Unique Callsigns:  3") != std::string::npos);
+    ASSERT_TRUE(stats.find("Unique Grids:      2") != std::string::npos);
+    ASSERT_TRUE(stats.find("Total Distance:    321.9 km") != std::string::npos);
+    ASSERT_TRUE(stats.find("Average Distance:  107.3 km") != std::string::npos);
+    ASSERT_TRUE(stats.find("Best DX:           118.2 km") != std::string::npos);
+    ASSERT_TRUE(stats.find("10 GHz") != std::string::npos);
+    ASSERT_TRUE(stats.find("24 GHz") != std::string::npos);
+
+    // 5. List / table formatting
+    std::string listStr = mgr.formatList();
+    ASSERT_TRUE(listStr.find("K6MG/R") != std::string::npos);
+    ASSERT_TRUE(listStr.find("10368.100 MHz") != std::string::npos);
+    ASSERT_TRUE(listStr.find("W6OP/R") != std::string::npos);
+
+    PASS();
+}
+
+void test_serial_cli_target_command() {
+    TEST("SerialCli 'target <grid>' command parsing, phonetics, and AppController sync");
+
+    GpsManager gps;
+    Calibration cal;
+    GpsSimulator sim;
+    SerialCli cli(gps, cal, sim);
+    cli.begin();
+
+    std::string cliOutput;
+    cli.setOutputHandler([](const char *str, void *ctx) {
+        auto *out = static_cast<std::string*>(ctx);
+        if (out && str) out->append(str);
+    }, &cliOutput);
+
+    // Fallback context: my current grid
+    cli.setCurrentGrid("CM87wa");
+
+    // 1. Plain grid target command
+    cliOutput.clear();
+    cli.executeCommand("target CM88qk");
+    ASSERT_TRUE(cliOutput.find("[TARGET] Target set to CM88qk") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("Bearing:") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("Distance:") != std::string::npos);
+
+    // 2. Phonetic grid target command
+    cliOutput.clear();
+    cli.executeCommand("target charlie mike 88 quebec kilo");
+    ASSERT_TRUE(cliOutput.find("[TARGET] Target set to CM88qk") != std::string::npos);
+
+    // 3. Spoken numbers in phonetic grid
+    cliOutput.clear();
+    cli.executeCommand("target charlie mike eight eight quebec kilo");
+    ASSERT_TRUE(cliOutput.find("[TARGET] Target set to CM88qk") != std::string::npos);
+
+    // 3b. Gboard voice dictation with "beta" and "87"
+    cliOutput.clear();
+    cli.executeCommand("target Charlie Mike 87 alpha beta");
+    ASSERT_TRUE(cliOutput.find("[TARGET] Target set to CM87ab") != std::string::npos);
+
+    // 4. Error handling: missing grid
+    cliOutput.clear();
+    cli.executeCommand("target");
+    ASSERT_TRUE(cliOutput.find("[TARGET ERROR] Missing grid square") != std::string::npos);
+
+    // 5. Error handling: invalid grid
+    cliOutput.clear();
+    cli.executeCommand("target invalidgrid");
+    ASSERT_TRUE(cliOutput.find("[TARGET ERROR] Invalid Maidenhead grid") != std::string::npos);
+
+    // 6. Full AppController integration
+    Board board;
+    DisplayUi display;
+    InputManager input;
+    RoverLogManager roverLog;
+    AppController app(board, display, input, gps, cal, sim, cli, &roverLog);
+    app.begin();
+
+    // Set my location to CM87wa
+    app.setMyGrid("CM87wa");
+    cli.executeCommand("target CM88qk");
+    ASSERT_STR_EQ(app.getTargetGrid(), "CM88qk");
+    ASSERT_TRUE(app.getDistance() > 100000.0); // ~118 km
+    ASSERT_TRUE(app.getBearing() > 300.0 && app.getBearing() < 360.0);
+
+    // Update target grid with phonetics through CLI
+    cli.executeCommand("target charlie mike eight eight quebec kilo");
+    ASSERT_STR_EQ(app.getTargetGrid(), "CM88qk");
+
+    // 7. Rover Mode natural exit: target command acts as remote alternative to tap-turnbezel
+    roverLog.clearHistory();
+    GeoPoint startPos(37.8816, -121.9142, true);
+    app.setCurrentPosition(startPos);
+    UserEvent evTapMyGrid;
+    evTapMyGrid.type = UserEventType::TouchLocalGrid;
+    app.handleUserEvent(evTapMyGrid, 1000); // Engage Rover Mode
+    ASSERT_TRUE(app.isRoverMode());
+    ASSERT_TRUE(app.getRoverLogManager().getStopCount() == 1); // Stop 1 = origin
+
+    // Simulate driving 25 km
+    GeoPoint pos25km = GpsSimulator::calculateRoverDisplacement(app.getOriginPoint(), 25.0, 45.0);
+    app.setCurrentPosition(pos25km);
+    app.update(2000);
+    ASSERT_TRUE(app.isRoverMode());
+
+    // Operator speaks remote target command
+    cli.executeCommand("target CM97aa", 2500);
+    ASSERT_TRUE(!app.isRoverMode()); // Dropped out of Rover Mode cleanly!
+    ASSERT_TRUE(app.getOperationalMode() == OperationalMode::Bearing);
+    ASSERT_STR_EQ(app.getTargetGrid(), "CM97aa");
+    ASSERT_TRUE(app.getRoverLogManager().getStopCount() == 2); // Stop 2 committed!
+    const RoverStop *stop2 = app.getRoverLogManager().getStop(1);
+    ASSERT_TRUE(stop2 != nullptr);
+    ASSERT_NEAR(stop2->displacement_km, 25.0f, 0.2f);
+    ASSERT_TRUE(stop2->qualified_16km);
+
+    PASS();
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "  GNSS Compass Unit Test Suite" << std::endl;
@@ -3985,6 +4505,11 @@ int main() {
     test_ble_diagnostics_and_text_helpers();
     test_serial_cli_dual_transport();
     test_app_controller_ble_integration();
+    test_voice_qso_parser();
+    test_voice_maidenhead_grid_parser();
+    test_qso_entry_and_log_manager();
+    test_qso_export_formatters();
+    test_serial_cli_target_command();
 
     std::cout << "========================================" << std::endl;
     std::cout << "  All " << tests_passed << " / " << tests_run << " tests PASSED successfully!" << std::endl;

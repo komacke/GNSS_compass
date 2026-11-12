@@ -232,6 +232,20 @@
 #define MIN_ROVER_STOPS              10
 #define ABS_MAX_ROVER_STOPS          500
 
+// ==============================================================================
+// Voice QSO Logging Configuration
+// ==============================================================================
+#define QSO_CFG_NAMESPACE            "qso_cfg"
+#define QSO_CFG_KEY_MAX_QSOS         "max_qsos"
+#define QSO_CFG_KEY_DEFAULT_BAND     "def_band"
+#define QSO_LOG_NAMESPACE            "qso_log"
+#define QSO_LOG_KEY_COUNT            "count"
+
+#define DEFAULT_MAX_QSOS             200
+#define MIN_QSOS                     10
+#define ABS_MAX_QSOS                 1000
+#define DEFAULT_QSO_BAND             "10 GHz"
+
 // Row 5 Rover Qualification Card Layout & Colors (RGB565)
 // Scaled to fit within 480x480 circular screen chord (chord width ~330 px at Y: 374..414)
 #define ROVER_CARD_SZ                3

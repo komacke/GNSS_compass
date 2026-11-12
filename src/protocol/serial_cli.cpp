@@ -1,4 +1,5 @@
 #include "serial_cli.h"
+#include "voice_qso_parser.h"
 #include "../geo/geo_math.h"
 #include "../geo/maidenhead.h"
 #include "text_output.h"
@@ -55,6 +56,8 @@ SerialCli::SerialCli(GpsManager &gpsManager, Calibration &calibration, GpsSimula
       roverStopCb_(nullptr),
       roverUndoCb_(nullptr),
       roverActionContext_(nullptr),
+      targetGridCb_(nullptr),
+      targetGridContext_(nullptr),
       outputFn_(nullptr),
       outputContext_(nullptr),
       restartCb_(nullptr),
@@ -178,6 +181,15 @@ void SerialCli::setCurrentGrid(const char *grid) {
         fallbackNavContext_.currentGrid[sizeof(fallbackNavContext_.currentGrid) - 1] = '\0';
     } else {
         fallbackNavContext_.currentGrid[0] = '\0';
+    }
+}
+
+void SerialCli::setTargetGrid(const char *grid) {
+    if (grid) {
+        strncpy(fallbackNavContext_.targetGrid, grid, sizeof(fallbackNavContext_.targetGrid) - 1);
+        fallbackNavContext_.targetGrid[sizeof(fallbackNavContext_.targetGrid) - 1] = '\0';
+    } else {
+        fallbackNavContext_.targetGrid[0] = '\0';
     }
 }
 
@@ -384,6 +396,10 @@ void SerialCli::executeCommand(const char *cmdLine, unsigned long nowMs, CliSour
         const char *arg = cleanCmd + 5;
         while (*arg == ' ' || *arg == '\t') arg++;
         handleRoverCommand(arg, nowMs);
+    } else if (startsWithIgnoreCase(cleanCmd, "target")) {
+        const char *arg = cleanCmd + 6;
+        while (*arg == ' ' || *arg == '\t') arg++;
+        handleTargetCommand(arg, nowMs);
     } else if (startsWithIgnoreCase(cleanCmd, "sim")) {
         const char *arg = cleanCmd + 3;
         while (*arg == ' ' || *arg == '\t') arg++;
@@ -892,6 +908,7 @@ void SerialCli::printHelp() {
     println("  gps check (or audit)  - Query receiver running parameters");
     println("  rover [status|start|stop|history|undo|max|clear]");
     println("                        - Rover transit tracking");
+    println("  target <grid>         - Remote target grid setting (supports phonetics)");
     println("  test (or demo)        - Run visual display self-test demo");
     println("  cal [snap|zero|<val>] - View or configure antenna calibration");
     println("  sim [on|off|hdg|pos|grid|rover|status]");
@@ -906,6 +923,46 @@ void SerialCli::printHelp() {
     println("  help (or ?)           - Show this help menu");
     println("====================================");
     println();
+}
+
+void SerialCli::handleTargetCommand(const char *arg, unsigned long nowMs) {
+    while (arg && (*arg == ' ' || *arg == '\t')) arg++;
+    if (!arg || *arg == '\0') {
+        println("[TARGET ERROR] Missing grid square. Usage: target <grid> (e.g. 'target CM88qk' or 'target charlie mike 88 quebec kilo')");
+        return;
+    }
+
+    std::string cleanGrid;
+    if (!VoiceQsoParser::parseGrid(arg, cleanGrid)) {
+        printFormat("[TARGET ERROR] Invalid Maidenhead grid: '%s'\r\n", arg);
+        return;
+    }
+
+    if (targetGridCb_) {
+        targetGridCb_(cleanGrid.c_str(), nowMs, targetGridContext_);
+    } else {
+        setTargetGrid(cleanGrid.c_str());
+    }
+
+    CliNavContext nctx = getNavContext();
+    double bearing = nctx.targetBearing;
+    double distKm = nctx.roverDistanceMeters / 1000.0;
+
+    // Fallback geodesic calculation when in standalone test mode without full AppController provider
+    if (!navContextFn_ && nctx.currentGrid[0] != '\0') {
+        GeoPoint curPt, tgtPt;
+        if (gridToGeoPoint(nctx.currentGrid, curPt) && gridToGeoPoint(cleanGrid.c_str(), tgtPt)) {
+            double distMeters = 0.0, brg = 0.0;
+            calculateWgs84(curPt, tgtPt, distMeters, brg);
+            bearing = brg;
+            distKm = distMeters / 1000.0;
+            fallbackNavContext_.targetBearing = bearing;
+            fallbackNavContext_.roverDistanceMeters = distMeters;
+        }
+    }
+
+    printFormat("[TARGET] Target set to %s (Bearing: %.1f deg, Distance: %.1f km)\r\n",
+                cleanGrid.c_str(), bearing, distKm);
 }
 
 void SerialCli::printGpsStatus(unsigned long nowMs) {

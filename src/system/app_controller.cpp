@@ -52,9 +52,24 @@ AppController::AppController(Board &board,
     std::strcpy(originGrid_, "JJ00AA00");
 }
 
-void AppController::setTargetGrid(const char *grid) {
+void AppController::setTargetGrid(const char *grid, unsigned long nowMs) {
+#if defined(ARDUINO)
+    if (nowMs == 0) nowMs = millis();
+#endif
+    if (nowMs > 0) currentNowMs_ = nowMs;
+
+    if (operationalMode_ == OperationalMode::Rover) {
+        onTargetEdited(currentNowMs_);
+    }
+    gridEditor_.setEditing(false);
     gridEditor_.setGrid(grid);
+    if (currentUiMode_ == UiMode::Normal) {
+        displayUi_.renderTargetGrid(gridEditor_.getGrid(), gridEditor_.getCursorColumn(), gridEditor_.isEditing());
+    }
     updateNavigation();
+    if (lastRenderedMode_ == OperationalMode::Rover) {
+        redrawMainScreen();
+    }
 }
 
 void AppController::setMyGrid(const char *grid) {
@@ -404,6 +419,11 @@ void AppController::begin() {
         this
     );
 
+    serialCli_.setTargetGridCallback([](const char *grid, unsigned long nowMs, void *ctx) {
+        auto *self = static_cast<AppController*>(ctx);
+        if (self) self->setTargetGrid(grid, nowMs);
+    }, this);
+
     serialCli_.setNavigationContextProvider([](void *ctx) -> CliNavContext {
         CliNavContext nctx;
         auto *self = static_cast<AppController*>(ctx);
@@ -415,6 +435,7 @@ void AppController::begin() {
             nctx.originLon = self->originPoint_.longitude;
             std::snprintf(nctx.originGrid, sizeof(nctx.originGrid), "%s", self->originGrid_);
             std::snprintf(nctx.currentGrid, sizeof(nctx.currentGrid), "%s", self->myGrid_);
+            std::snprintf(nctx.targetGrid, sizeof(nctx.targetGrid), "%s", self->gridEditor_.getGrid());
             nctx.roverState = self->lastRoverState_;
             nctx.lastValidDisplacementKm = self->lastValidDisplacementKm_;
             unsigned long now = self->currentNowMs_;
