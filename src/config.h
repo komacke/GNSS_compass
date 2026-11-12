@@ -75,6 +75,8 @@
 #define BUTTON_SAVE_HOLD_BG  0x0540
 #define BUTTON_DISCARD_IDLE_BG   0x4000
 #define BUTTON_DISCARD_HOLD_BG   0x6000
+#define BUTTON_OK_IDLE_BG        0x1B19
+#define BUTTON_SNAP_IDLE_BG      BUTTON_BLUE_BG
 
 // ==============================================================================
 // Display Dimensions & Layout (480 x 480 Round Display)
@@ -245,6 +247,27 @@
 #define MIN_QSOS                     10
 #define ABS_MAX_QSOS                 1000
 #define DEFAULT_QSO_BAND             "10 GHz"
+
+// QSO Pop-Up Card Modal Dialog Geometry
+#define QSO_MODAL_X                  40
+#define QSO_MODAL_Y                  65
+#define QSO_MODAL_W                  400
+#define QSO_MODAL_H                  350
+
+// QSO Pop-Up Card "OK" Button Geometry
+#define QSO_BTN_OK_X                 150
+#define QSO_BTN_OK_Y                 330
+#define QSO_BTN_OK_W                 180
+#define QSO_BTN_OK_H                 42
+
+// QSO Pop-Up Card Touch Hit Areas
+#define QSO_TOUCH_OK_X_MIN           130
+#define QSO_TOUCH_OK_X_MAX           350
+#define QSO_TOUCH_OK_Y_MIN           320
+#define QSO_TOUCH_OK_Y_MAX           385
+
+// QSO Pop-Up Card Auto-Dismiss Timeout (10 seconds)
+#define QSO_MODAL_TIMEOUT_MS         10000
 
 // Row 5 Rover Qualification Card Layout & Colors (RGB565)
 // Scaled to fit within 480x480 circular screen chord (chord width ~330 px at Y: 374..414)

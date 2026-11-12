@@ -4450,6 +4450,485 @@ void test_serial_cli_target_command() {
     PASS();
 }
 
+void test_qso_card_formatters_and_modal_state() {
+    TEST("QsoCard formatters, button hit testing, active card state, and timeout");
+
+    // 1. Static text formatters
+    char buf[64];
+    QsoCard::formatHeader(0, buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "*** QSO LOGGED ***");
+
+    QsoCard::formatHeader(15, buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "*** QSO LOGGED #15 ***");
+
+    QsoCard::formatCallsign("K6MG/R", buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "K6MG/R");
+
+    QsoCard::formatCallsign(nullptr, buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "");
+
+    QsoCard::formatBandFreq("10 GHz", 10368100, buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "10 GHz (10368.100 MHz)");
+
+    QsoCard::formatBandFreq("LIGHT", 0, buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "LIGHT");
+
+    QsoCard::formatBandFreq(nullptr, 0, buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "10 GHz");
+
+    QsoCard::formatGrids("CM87wa", "CM88qk", buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "CM87wa -> CM88qk");
+
+    QsoCard::formatGrids(nullptr, nullptr, buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "------ -> ------");
+
+    QsoCard::formatDistanceBearing(118.2f, 342.3f, buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "118.2 km @ 342 deg");
+
+    QsoCard::formatTime(1789853640, buf, sizeof(buf)); // 21:34:00 UTC
+    ASSERT_STR_EQ(buf, "Time: 21:34 UTC");
+
+    QsoCard::formatTime(0, buf, sizeof(buf));
+    ASSERT_STR_EQ(buf, "Time: --:-- UTC");
+
+    // 2. Button hit-testing
+    ASSERT_TRUE(QsoCard::isOkButtonTouched(240, 350));
+    ASSERT_TRUE(QsoCard::isOkButtonTouched(150, 330));
+    ASSERT_TRUE(!QsoCard::isOkButtonTouched(10, 10));
+    ASSERT_TRUE(!QsoCard::isOkButtonTouched(400, 400));
+
+    // 3. Active card state & 10s auto-dismiss timer
+    QsoCard card;
+    ASSERT_TRUE(!card.isVisible());
+
+    QsoEntry q(1789853640, "K6MG", "10 GHz", 10368100, "CM87wa", "CM88qk", 118.2f, 342.0f);
+    card.show(q, 1, 1000);
+    ASSERT_TRUE(card.isVisible());
+    ASSERT_TRUE(card.getOpenedMs() == 1000);
+    ASSERT_TRUE(card.getActiveQsoIndex() == 1);
+    ASSERT_STR_EQ(card.getActiveQso().callsign, "K6MG");
+
+    // Check timeout before 10 seconds
+    ASSERT_TRUE(!card.checkTimeout(5000));
+    ASSERT_TRUE(card.isVisible());
+    ASSERT_TRUE(!card.checkTimeout(10999));
+    ASSERT_TRUE(card.isVisible());
+
+    // Check timeout at 10 seconds
+    ASSERT_TRUE(card.checkTimeout(11000));
+    ASSERT_TRUE(!card.isVisible());
+
+    // Explicit dismiss
+    card.show(q, 2, 20000);
+    ASSERT_TRUE(card.isVisible());
+    card.dismiss();
+    ASSERT_TRUE(!card.isVisible());
+
+    PASS();
+}
+
+void test_app_controller_qso_card_interaction() {
+    TEST("AppController QSO card UI mode, 10s auto-dismiss, and touch/encoder dismiss");
+
+    Board board;
+    DisplayUi display;
+    InputManager input;
+    GpsManager gps;
+    Calibration cal;
+    GpsSimulator sim;
+    RoverLogManager roverLog;
+    QsoLogManager qsoLog;
+    SerialCli cli(gps, cal, sim, &roverLog, nullptr, &qsoLog);
+    AppController app(board, display, input, gps, cal, sim, cli, &roverLog, nullptr, &qsoLog);
+    app.begin();
+
+    ASSERT_TRUE(app.getUiMode() == UiMode::Normal);
+
+    QsoEntry q(1789853640, "K6MG", "10 GHz", 10368100, "CM87wa", "CM88qk", 118.2f, 342.0f);
+
+    // 1. Show card -> enters UiMode::QsoCard
+    app.showQsoCard(q, 1, 1000);
+    ASSERT_TRUE(app.getUiMode() == UiMode::QsoCard);
+    ASSERT_TRUE(display.getQsoCard().isVisible());
+    ASSERT_TRUE(app.getQsoCardOpenedMs() == 1000);
+
+    // 2. 10-second non-blocking auto-dismiss
+    app.update(5000);
+    ASSERT_TRUE(app.getUiMode() == UiMode::QsoCard);
+    ASSERT_TRUE(display.getQsoCard().isVisible());
+
+    app.update(11000);
+    ASSERT_TRUE(app.getUiMode() == UiMode::Normal);
+    ASSERT_TRUE(!display.getQsoCard().isVisible());
+
+    // 3. Manual dismiss via screen touch [ OK ] button
+    app.showQsoCard(q, 2, 20000);
+    ASSERT_TRUE(app.getUiMode() == UiMode::QsoCard);
+
+    input.injectTouch(true, 240, 350, 20500);
+    input.injectTouch(false, 240, 350, 20600);
+    app.update(20650);
+    ASSERT_TRUE(app.getUiMode() == UiMode::Normal);
+    ASSERT_TRUE(!display.getQsoCard().isVisible());
+
+    // 4. Manual dismiss via screen tap anywhere
+    app.showQsoCard(q, 3, 30000);
+    ASSERT_TRUE(app.getUiMode() == UiMode::QsoCard);
+
+    input.injectTouch(true, 100, 100, 30100);
+    input.injectTouch(false, 100, 100, 30200);
+    app.update(30250);
+    ASSERT_TRUE(app.getUiMode() == UiMode::Normal);
+    ASSERT_TRUE(!display.getQsoCard().isVisible());
+
+    // 5. Manual dismiss via rotary encoder push
+    app.showQsoCard(q, 4, 40000);
+    ASSERT_TRUE(app.getUiMode() == UiMode::QsoCard);
+
+    input.injectEncoderButton(true);
+    app.update(40100);
+    ASSERT_TRUE(app.getUiMode() == UiMode::Normal);
+    ASSERT_TRUE(!display.getQsoCard().isVisible());
+
+    // 6. Manual dismiss via rotary knob rotation
+    app.showQsoCard(q, 5, 50000);
+    ASSERT_TRUE(app.getUiMode() == UiMode::QsoCard);
+
+    input.injectEncoderStep(+1);
+    app.update(50100);
+    ASSERT_TRUE(app.getUiMode() == UiMode::Normal);
+    ASSERT_TRUE(!display.getQsoCard().isVisible());
+
+    PASS();
+}
+
+void test_serial_cli_log_commands() {
+    TEST("SerialCli 'log' commands: log, undo, delete, clear, list, stats, export, default, max");
+
+    QsoLogManager::resetHostStorage();
+    GpsManager gps;
+    Calibration cal;
+    GpsSimulator sim;
+    RoverLogManager roverLog;
+    QsoLogManager qsoLog;
+    SerialCli cli(gps, cal, sim, &roverLog, nullptr, &qsoLog);
+    cli.begin();
+    qsoLog.begin();
+
+    std::string cliOutput;
+    cli.setOutputHandler([](const char *str, void *ctx) {
+        auto *out = static_cast<std::string*>(ctx);
+        if (out && str) out->append(str);
+    }, &cliOutput);
+
+    // Setup active GPS location & target context
+    cli.setCurrentGrid("CM87wa");
+    cli.setTargetGrid("CM88qk");
+    gps.setTime(21, 34);
+    gps.setEpochTime(1789853640);
+
+    // Track QSO logged pop-up callback
+    bool qsoCardTriggered = false;
+    cli.setQsoLoggedCallback([](const QsoEntry & /* entry */, size_t /* qsoIndex */, unsigned long /* nowMs */, void *ctx) {
+        auto *flag = static_cast<bool*>(ctx);
+        if (flag) *flag = true;
+    }, &qsoCardTriggered);
+
+    // 1. Direct-to-save fast path: log <call> <band>
+    cliOutput.clear();
+    qsoCardTriggered = false;
+    cli.executeCommand("log k6mg 10", 1000);
+    ASSERT_TRUE(qsoCardTriggered);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 1);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #1] K6MG | 10 GHz (10368.100 MHz) | 21:34z | CM87wa -> CM88qk (163.7 km @ 345 deg)") != std::string::npos);
+
+    const QsoEntry *e1 = qsoLog.getQso(0);
+    ASSERT_TRUE(e1 != nullptr);
+    ASSERT_STR_EQ(e1->callsign, "K6MG");
+    ASSERT_STR_EQ(e1->band, "10 GHz");
+    ASSERT_TRUE(e1->freq_khz == 10368100);
+    ASSERT_STR_EQ(e1->my_grid, "CM87wa");
+    ASSERT_STR_EQ(e1->his_grid, "CM88qk");
+    ASSERT_NEAR(e1->distance_km, 163.7f, 0.5f);
+    ASSERT_NEAR(e1->bearing_deg, 345.0f, 1.0f);
+
+    // 2. Band without "GHz": log <call> 24
+    cliOutput.clear();
+    cli.executeCommand("log w6op/r 24", 2000);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 2);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #2] W6OP/R | 24 GHz (24192.100 MHz)") != std::string::npos);
+
+    // 3. Exact frequency in digits: log <call> 10368.1
+    cliOutput.clear();
+    cli.executeCommand("log k6eme 10368.1", 3000);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 3);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #3] K6EME | 10 GHz (10368.100 MHz)") != std::string::npos);
+
+    // 4. NATO phonetics dictation: log kilo six mike golf 47
+    cliOutput.clear();
+    cli.executeCommand("log kilo six mike golf 47", 4000);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 4);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #4] K6MG | 47 GHz (47088.100 MHz)") != std::string::npos);
+
+    // 5. Default band applied when band omitted: log n6jv
+    cliOutput.clear();
+    cli.executeCommand("log n6jv", 5000);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 5);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #5] N6JV | 10 GHz (10368.100 MHz)") != std::string::npos);
+
+    // 6. Incomplete input prompt and hotword "cancel"
+    cliOutput.clear();
+    cli.executeCommand("log", 6000);
+    ASSERT_TRUE(cliOutput.find("[QSO] Callsign? (e.g. 'K6MG' or 'Kilo Six Mike Golf', or 'cancel')") != std::string::npos);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 5); // Nothing logged yet
+
+    cliOutput.clear();
+    cli.executeCommand("cancel", 6100);
+    ASSERT_TRUE(cliOutput.find("[QSO] Cancelled.") != std::string::npos);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 5);
+
+    // 7. Incomplete input prompt and successful resolution
+    cliOutput.clear();
+    cli.executeCommand("log", 7000);
+    ASSERT_TRUE(cliOutput.find("[QSO] Callsign?") != std::string::npos);
+
+    cliOutput.clear();
+    cli.executeCommand("w6yx", 7100);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 6);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #6] W6YX | 10 GHz (10368.100 MHz)") != std::string::npos);
+
+    // 8. log undo
+    cliOutput.clear();
+    cli.executeCommand("log undo", 8000);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 5);
+    ASSERT_TRUE(cliOutput.find("[QSO LOG] Removed last entry #6 (W6YX on 10 GHz). Log contains 5 contacts.") != std::string::npos);
+
+    // 9. log delete <#> / log del <#>
+    cliOutput.clear();
+    cli.executeCommand("log delete 2", 9000); // Remove W6OP/R on 24 GHz
+    ASSERT_TRUE(qsoLog.getQsoCount() == 4);
+    ASSERT_TRUE(cliOutput.find("[QSO LOG] Deleted QSO #2 (W6OP/R on 24 GHz). Entries re-indexed (4 contacts remain).") != std::string::npos);
+
+    // Out of bounds delete error handling
+    cliOutput.clear();
+    cli.executeCommand("log delete 99", 9100);
+    ASSERT_TRUE(cliOutput.find("[QSO ERROR] Invalid QSO index '99'") != std::string::npos);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 4);
+
+    // 10. log list / show
+    cliOutput.clear();
+    cli.executeCommand("log list", 10000);
+    ASSERT_TRUE(cliOutput.find("K6MG") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("10368.100 MHz") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("47088.100 MHz") != std::string::npos);
+
+    // 11. log stats
+    cliOutput.clear();
+    cli.executeCommand("log stats", 11000);
+    ASSERT_TRUE(cliOutput.find("Contest QSO Statistics") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("Total QSOs:        4") != std::string::npos);
+
+    // 12. log export <cabrillo|adif|csv>
+    cliOutput.clear();
+    cli.executeCommand("log export cabrillo", 12000);
+    ASSERT_TRUE(cliOutput.find("START-OF-LOG: 3.0") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("10G   PH") != std::string::npos);
+
+    cliOutput.clear();
+    cli.executeCommand("log export adif", 12100);
+    ASSERT_TRUE(cliOutput.find("<ADIF_VER:5>3.1.4") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("<CALL:4>K6MG") != std::string::npos);
+
+    cliOutput.clear();
+    cli.executeCommand("log export csv", 12200);
+    ASSERT_TRUE(cliOutput.find("Timestamp,Date,Time,Callsign,Band") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("K6MG,10 GHz") != std::string::npos);
+
+    // Invalid export format error handling
+    cliOutput.clear();
+    cli.executeCommand("log export json", 12300);
+    ASSERT_TRUE(cliOutput.find("[QSO ERROR] Unknown export format 'json'") != std::string::npos);
+
+    // 13. log default band <band>
+    cliOutput.clear();
+    cli.executeCommand("log default band 24", 13000);
+    ASSERT_TRUE(cliOutput.find("[QSO LOG] Default band set to 24 GHz.") != std::string::npos);
+    ASSERT_STR_EQ(qsoLog.getDefaultBand().c_str(), "24 GHz");
+
+    // Next log without band uses new default
+    cliOutput.clear();
+    cli.executeCommand("log k6mg", 13100);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #5] K6MG | 24 GHz (24192.100 MHz)") != std::string::npos);
+
+    // Reset default band to 10 GHz
+    cli.executeCommand("log default band 10 GHz", 13200);
+    ASSERT_STR_EQ(qsoLog.getDefaultBand().c_str(), "10 GHz");
+
+    // 14. log max <#>
+    cliOutput.clear();
+    cli.executeCommand("log max 500", 14000);
+    ASSERT_TRUE(cliOutput.find("Maximum capacity set to 500 QSOs") != std::string::npos);
+    ASSERT_TRUE(qsoLog.getMaxQsos() == 500);
+
+    // 15. log clear: prompt, abort, and confirm
+    cliOutput.clear();
+    cli.executeCommand("log clear", 15000);
+    ASSERT_TRUE(cliOutput.find("WARNING: This will permanently erase all contest QSO history!") != std::string::npos);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 5); // Intact
+
+    cliOutput.clear();
+    cli.executeCommand("no", 15100);
+    ASSERT_TRUE(cliOutput.find("QSO clear aborted.") != std::string::npos);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 5);
+
+    cliOutput.clear();
+    cli.executeCommand("log clear", 15200);
+    cli.executeCommand("yes", 15300);
+    ASSERT_TRUE(cliOutput.find("Contest QSO log cleared (0 contacts).") != std::string::npos);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 0);
+
+    // Direct clear confirm
+    cli.executeCommand("log k6mg 10", 15400);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 1);
+    cliOutput.clear();
+    cli.executeCommand("log clear confirm", 15500);
+    ASSERT_TRUE(cliOutput.find("Contest QSO log cleared (0 contacts).") != std::string::npos);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 0);
+
+    PASS();
+}
+
+void test_voice_logging_contest_session_e2e() {
+    TEST("End-to-End multi-band contest voice logging session simulation");
+
+    QsoLogManager::resetHostStorage();
+    Board board;
+    DisplayUi display;
+    InputManager input;
+    GpsManager gps;
+    Calibration cal;
+    GpsSimulator sim;
+    RoverLogManager roverLog;
+    QsoLogManager qsoLog;
+    SerialCli cli(gps, cal, sim, &roverLog, nullptr, &qsoLog);
+    AppController app(board, display, input, gps, cal, sim, cli, &roverLog, nullptr, &qsoLog);
+    app.begin();
+
+    std::string cliOutput;
+    cli.setOutputHandler([](const char *str, void *ctx) {
+        auto *out = static_cast<std::string*>(ctx);
+        if (out && str) out->append(str);
+    }, &cliOutput);
+
+    // Operator deploys to Mt. Diablo (CM87wa)
+    app.setMyGrid("CM87wa");
+    gps.setTime(18, 0);
+    gps.setEpochTime(1789840800);
+
+    // 1. Operator sets remote target grid: CM88qk
+    cliOutput.clear();
+    cli.executeCommand("target charlie mike 88 quebec kilo", 1000);
+    ASSERT_STR_EQ(app.getTargetGrid(), "CM88qk");
+    ASSERT_TRUE(cliOutput.find("[TARGET] Target set to CM88qk") != std::string::npos);
+
+    // 2. QSO 1: 10 GHz contact with K6MG/R
+    cliOutput.clear();
+    cli.executeCommand("log k6mg/r 10", 2000);
+    app.update(2000);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #1] K6MG/R | 10 GHz (10368.100 MHz)") != std::string::npos);
+    ASSERT_TRUE(app.getUiMode() == UiMode::QsoCard);
+    ASSERT_TRUE(display.getQsoCard().isVisible());
+    ASSERT_STR_EQ(display.getQsoCard().getActiveQso().callsign, "K6MG/R");
+
+    // Operator taps screen [ OK ] button to dismiss modal
+    input.injectTouch(true, 240, 350, 3000);
+    input.injectTouch(false, 240, 350, 3100);
+    app.update(3150);
+    ASSERT_TRUE(app.getUiMode() == UiMode::Normal);
+    ASSERT_TRUE(!display.getQsoCard().isVisible());
+
+    // 3. QSO 2: Band escalation to 24 GHz
+    cliOutput.clear();
+    cli.executeCommand("log 24 k6mg/r", 4000);
+    app.update(4000);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #2] K6MG/R | 24 GHz (24192.100 MHz)") != std::string::npos);
+    ASSERT_TRUE(app.getUiMode() == UiMode::QsoCard);
+
+    // Let 10s auto-dismiss timer expire
+    app.update(14001);
+    ASSERT_TRUE(app.getUiMode() == UiMode::Normal);
+
+    // 4. QSO 3: Band escalation to 47 GHz
+    cliOutput.clear();
+    cli.executeCommand("log k6mg/r 47", 15000);
+    app.update(15000);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #3] K6MG/R | 47 GHz (47088.100 MHz)") != std::string::npos);
+    // Dismiss via rotary knob press
+    input.injectEncoderButton(true);
+    app.update(15100);
+    ASSERT_TRUE(app.getUiMode() == UiMode::Normal);
+
+    // 5. QSO 4: Band escalation to 122 GHz
+    cliOutput.clear();
+    cli.executeCommand("log k6mg/r 122", 16000);
+    app.update(16000);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #4] K6MG/R | 122 GHz (122250.100 MHz)") != std::string::npos);
+    app.update(26001); // 10s auto-dismiss
+
+    // 6. QSO 5: Band escalation to Laser / Light
+    cliOutput.clear();
+    cli.executeCommand("log k6mg/r laser", 27000);
+    app.update(27000);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #5] K6MG/R | LIGHT") != std::string::npos);
+    app.update(37001); // 10s auto-dismiss
+
+    // 7. Re-point antenna to new station in Sierra Foothills: target CM97aa
+    cliOutput.clear();
+    cli.executeCommand("target CM97aa", 40000);
+    ASSERT_STR_EQ(app.getTargetGrid(), "CM97aa");
+
+    // 8. QSO 6: Log K6EME using NATO phonetics on 10 GHz
+    cliOutput.clear();
+    cli.executeCommand("log kilo six echo mike echo 10", 41000);
+    app.update(41000);
+    ASSERT_TRUE(cliOutput.find("[QSO LOGGED #6] K6EME | 10 GHz (10368.100 MHz)") != std::string::npos);
+    app.update(51001); // 10s auto-dismiss
+
+    // 9. Accidental entry & undo verification
+    cliOutput.clear();
+    cli.executeCommand("log w1xyz 10", 52000);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 7);
+    cli.executeCommand("log undo", 53000);
+    ASSERT_TRUE(qsoLog.getQsoCount() == 6);
+    ASSERT_STR_EQ(qsoLog.getLastQso()->callsign, "K6EME");
+
+    // 10. Verify contest totals and exports
+    cliOutput.clear();
+    cli.executeCommand("log stats", 60000);
+    ASSERT_TRUE(cliOutput.find("Total QSOs:        6") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("Unique Callsigns:  2") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("Unique Grids:      2") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("10 GHz") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("24 GHz") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("47 GHz") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("122 GHz") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("LIGHT") != std::string::npos);
+
+    // Cabrillo log export
+    cliOutput.clear();
+    cli.executeCommand("log export cabrillo", 61000);
+    ASSERT_TRUE(cliOutput.find("START-OF-LOG: 3.0") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("CONTEST: ARRL-10-GHZ") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("10G   PH") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("24G   PH") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("47G   PH") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("122G  PH") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("LIGHT PH") != std::string::npos);
+    ASSERT_TRUE(cliOutput.find("END-OF-LOG:") != std::string::npos);
+
+    PASS();
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "  GNSS Compass Unit Test Suite" << std::endl;
@@ -4510,6 +4989,10 @@ int main() {
     test_qso_entry_and_log_manager();
     test_qso_export_formatters();
     test_serial_cli_target_command();
+    test_qso_card_formatters_and_modal_state();
+    test_app_controller_qso_card_interaction();
+    test_serial_cli_log_commands();
+    test_voice_logging_contest_session_e2e();
 
     std::cout << "========================================" << std::endl;
     std::cout << "  All " << tests_passed << " / " << tests_run << " tests PASSED successfully!" << std::endl;

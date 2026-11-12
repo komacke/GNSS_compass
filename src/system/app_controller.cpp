@@ -14,7 +14,8 @@ AppController::AppController(Board &board,
                              GpsSimulator &gpsSimulator,
                              SerialCli &serialCli,
                              RoverLogManager *roverLogManager,
-                             BleSerialManager *bleManager)
+                             BleSerialManager *bleManager,
+                             QsoLogManager *qsoLogManager)
     : board_(board),
       displayUi_(displayUi),
       inputManager_(inputManager),
@@ -23,6 +24,7 @@ AppController::AppController(Board &board,
       gpsSimulator_(gpsSimulator),
       serialCli_(serialCli),
       roverLogManagerRef_(roverLogManager ? roverLogManager : &roverLogManagerOwned_),
+      qsoLogManagerRef_(qsoLogManager ? qsoLogManager : &qsoLogManagerOwned_),
       bleManager_(bleManager),
       bleConnected_(false),
       hasLocation_(false),
@@ -45,6 +47,7 @@ AppController::AppController(Board &board,
       currentUiMode_(UiMode::Normal),
       isSelfTesting_(false),
       calModalOpenedMillis_(0),
+      qsoCardOpenedMillis_(0),
       pendingModalButtonRelease_(ModalButtonId::None),
       pendingModalButtonReleaseStartMillis_(0)
 {
@@ -214,6 +217,23 @@ void AppController::discardLastStopAndRearm(unsigned long nowMs) {
     redrawMainScreen();
 }
 
+void AppController::showQsoCard(const QsoEntry &qso, size_t qsoIndex, unsigned long nowMs) {
+#if defined(ARDUINO)
+    if (nowMs == 0) nowMs = millis();
+#endif
+    if (nowMs > 0) currentNowMs_ = nowMs;
+    qsoCardOpenedMillis_ = nowMs;
+    setUiMode(UiMode::QsoCard);
+    displayUi_.getQsoCard().show(qso, qsoIndex, nowMs);
+    displayUi_.getQsoCard().drawModal(qso, qsoIndex);
+}
+
+void AppController::dismissQsoCard() {
+    displayUi_.getQsoCard().dismiss();
+    setUiMode(UiMode::Normal);
+    redrawMainScreen();
+}
+
 void AppController::setUiMode(UiMode mode) {
     currentUiMode_ = mode;
     inputManager_.setUiMode(mode);
@@ -259,7 +279,7 @@ void AppController::recalculateGeodesy() {
 }
 
 void AppController::renderNavigationRows() {
-    if (currentUiMode_ == UiMode::Calibrating || currentUiMode_ == UiMode::RoverHistory) {
+    if (currentUiMode_ == UiMode::Calibrating || currentUiMode_ == UiMode::RoverHistory || currentUiMode_ == UiMode::QsoCard) {
         return;
     }
 
@@ -357,6 +377,7 @@ void AppController::begin() {
     inputManager_.begin();
     calibration_.begin();
     roverLogManagerRef_->begin();
+    qsoLogManagerRef_->begin();
 
     gpsManager_.setSimulator(&gpsSimulator_);
 #if defined(ARDUINO)
@@ -403,6 +424,11 @@ void AppController::begin() {
         serialCli_.setBleManager(bleManager_);
     }
     serialCli_.setRoverLogManager(roverLogManagerRef_);
+    serialCli_.setQsoLogManager(qsoLogManagerRef_);
+    serialCli_.setQsoLoggedCallback([](const QsoEntry &entry, size_t qsoIndex, unsigned long nowMs, void *ctx) {
+        auto *self = static_cast<AppController*>(ctx);
+        if (self) self->showQsoCard(entry, qsoIndex, nowMs);
+    }, this);
     serialCli_.setRoverCallbacks(
         [](void *ctx, unsigned long nowMs) {
             auto *self = static_cast<AppController*>(ctx);
@@ -531,6 +557,21 @@ void AppController::handleUserEvent(const UserEvent &event, unsigned long nowMs)
     if (nowMs == 0) nowMs = millis();
 #endif
     if (nowMs > 0) currentNowMs_ = nowMs;
+
+    if (currentUiMode_ == UiMode::QsoCard) {
+        if (event.type == UserEventType::EncoderButtonPressed ||
+            event.type == UserEventType::DismissQsoCardTriggered ||
+            event.type == UserEventType::RotateClockwise ||
+            event.type == UserEventType::RotateCounterClockwise ||
+            event.type == UserEventType::CancelModalTriggered ||
+            event.type == UserEventType::TouchLocalGrid ||
+            event.type == UserEventType::TouchGridCharacter ||
+            event.type == UserEventType::TouchCalibrationPill ||
+            event.type == UserEventType::TouchVersionFooter) {
+            dismissQsoCard();
+            return;
+        }
+    }
 
     switch (event.type) {
         case UserEventType::RotateClockwise:
@@ -753,6 +794,10 @@ void AppController::update(unsigned long nowMs) {
         if ((nowMs - calModalOpenedMillis_) >= CAL_MODAL_TIMEOUT_MS) {
             setUiMode(UiMode::Normal);
             redrawMainScreen();
+        }
+    } else if (currentUiMode_ == UiMode::QsoCard) {
+        if (displayUi_.getQsoCard().checkTimeout(nowMs)) {
+            dismissQsoCard();
         }
     }
 

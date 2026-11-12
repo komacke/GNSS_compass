@@ -8,6 +8,8 @@
 #include "../gnss/simulator.h"
 #include "../ui/rover_card.h"
 #include "../system/rover_log_manager.h"
+#include "../system/qso_entry.h"
+#include "../system/qso_log_manager.h"
 #include "ble_serial_manager.h"
 #include "line_buffer.h"
 
@@ -19,6 +21,7 @@ typedef void (*CliRoverSimCallback)(const char *originGrid, double distKm, void 
 typedef void (*CliRoverActionCallback)(void *context, unsigned long nowMs);
 typedef void (*CliRestartCallback)(void *context);
 typedef void (*CliTargetGridCallback)(const char *grid, unsigned long nowMs, void *context);
+typedef void (*CliQsoLoggedCallback)(const QsoEntry &entry, size_t qsoIndex, unsigned long nowMs, void *context);
 
 /**
  * @brief Input source of the CLI command
@@ -56,7 +59,8 @@ class SerialCli {
 public:
     SerialCli(GpsManager &gpsManager, Calibration &calibration, GpsSimulator &simulator,
               RoverLogManager *roverLogManager = nullptr,
-              BleSerialManager *bleManager = nullptr);
+              BleSerialManager *bleManager = nullptr,
+              QsoLogManager *qsoLogManager = nullptr);
 
     // Initializes CLI state
     void begin();
@@ -128,6 +132,15 @@ public:
     void setRoverLogManager(RoverLogManager *mgr) { roverLogManager_ = mgr; }
     RoverLogManager* getRoverLogManager() const { return roverLogManager_; }
 
+    // QSO Log & Actions
+    void setQsoLogManager(QsoLogManager *mgr) { qsoLogManager_ = mgr; }
+    QsoLogManager* getQsoLogManager() const { return qsoLogManager_; }
+
+    void setQsoLoggedCallback(CliQsoLoggedCallback cb, void *context = nullptr) {
+        qsoLoggedCb_ = cb;
+        qsoLoggedContext_ = context;
+    }
+
     void setRoverCallbacks(CliRoverActionCallback onStart,
                            CliRoverActionCallback onStop,
                            CliRoverActionCallback onUndo,
@@ -153,6 +166,16 @@ public:
     void printRoverHelp();
     void printPrompt();
     void handleTargetCommand(const char *arg, unsigned long nowMs = 0);
+    void handleLogCommand(const char *arg, unsigned long nowMs = 0);
+    void handleLogUndo();
+    void handleLogDelete(const char *arg);
+    void handleLogClear(const char *arg);
+    void doLogClear();
+    void handleLogList();
+    void handleLogStats();
+    void handleLogExport(const char *arg);
+    void handleLogDefault(const char *arg);
+    void printLogHelp();
 
     // Receiver audit query & parsing
     struct GpsAuditState {
@@ -235,6 +258,7 @@ private:
     Calibration &calibration_;
     GpsSimulator &simulator_;
     RoverLogManager *roverLogManager_;
+    QsoLogManager *qsoLogManager_;
     BleSerialManager *bleManager_;
     CliSource activeSource_;
 
@@ -254,12 +278,17 @@ private:
     void *roverActionContext_;
     CliTargetGridCallback targetGridCb_;
     void *targetGridContext_;
+    CliQsoLoggedCallback qsoLoggedCb_;
+    void *qsoLoggedContext_;
     CliCommandOutputFn outputFn_;
     void *outputContext_;
     CliRestartCallback restartCb_;
     void *restartContext_;
 
     bool pendingRoverClear_;
+    bool pendingQsoClear_;
+    bool pendingQsoInput_;
+    CliSource pendingQsoSource_;
     bool pendingAudit_;
     CliSource pendingAuditSource_;
     bool pendingConfig_;

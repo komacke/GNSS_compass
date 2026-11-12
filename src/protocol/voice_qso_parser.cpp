@@ -302,7 +302,12 @@ bool VoiceQsoParser::parseBandOrFreq(const std::string &token,
                                      uint32_t &outFreqKhz,
                                      std::string &outCabrillo,
                                      std::string &outAdif) {
-    std::string t = toLower(token);
+    std::string t;
+    for (char c : token) {
+        if (c != ' ' && c != '\t') {
+            t += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+    }
 
     // Light / Laser
     if (t == "light" || t == "laser") {
