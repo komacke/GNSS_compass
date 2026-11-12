@@ -1,6 +1,6 @@
-# Voice-Friendly Contest QSO Logging — Technical Design
+# Voice-Friendly Contest QSO Logging & Remote Target Setting — Technical Design
 
-* **Feature:** Voice-Dictated Contest QSO Logging via Bluetooth Low Energy & USB Serial
+* **Feature:** Voice-Dictated Contest QSO Logging & Remote Target Setting via Bluetooth Low Energy & USB Serial
 * **Status:** Proposed / Ready for Review
 * **Target Hardware:** ESP32-S3 (16 MB Flash, 8 MB OPI PSRAM), Elecrow 2.1" Round Touch Display (480×480)
 * **Architecture Base:** Modular C++ Architecture (`src/protocol/serial_cli.h`, `src/system/app_controller.h`)
@@ -10,17 +10,17 @@
 
 ## 1. Executive Summary & Field Motivation
 
-During amateur microwave and VHF/UHF contests (such as the ARRL 10 GHz and Up Contest, ARRL June/September VHF contests, and microwave sprint events), operators frequently deploy portable or rover stations to mountain summits, coastal overlooks, and roadside turnouts.
+During amateur microwave and VHF/UHF contests (such as the ARRL 10 GHz and Up Contest, ARRL June/September VHF contests, and regional microwave sprints), operators frequently deploy portable or rover stations to mountain summits, coastal overlooks, and roadside turnouts.
 
 Operating in these environments imposes extreme physical constraints:
 * Operators are actively peaking dish azimuth/elevation, listening for faint CW/SSB signals near the noise floor, or working through wind and harsh sunlight.
 * Entering log data via laptop keyboards or smartphone touchscreens in high ambient glare while wearing gloves or holding gear is slow, error-prone, and distracting.
-* Most microwave contacts take place on a single primary band (**10 GHz**), with occasional coordinated escalations to higher/lower bands (e.g. 5.7 GHz, 24 GHz).
+* Most microwave contacts take place on a single primary band (**10 GHz**), with occasional coordinated escalations to higher millimeter-wave bands (**24 GHz, 47 GHz, 76 GHz, 122 GHz, 134 GHz, 241 GHz, and Laser**) or lower VHF/UHF bands.
 
 ```
                       ┌──────────────────────────────────────────────┐
                       │    Smartphone (Voice Dictation / Gboard)     │
-                      │   "log n9dk 10 GHz"   /   "save it"          │
+                      │   "log n9dk 10"  or  "target CM88qk"         │
                       └───────────────────────┬──────────────────────┘
                                               │ BLE UART (NUS)
                                               ▼
@@ -31,26 +31,28 @@ Operating in these environments imposes extreme physical constraints:
 │   │   LineBuffer / BLE  │  ──>  │      VoiceQsoParser                       │   │
 │   └─────────────────────┘       │  - Strips dictation punctuation           │   │
 │                                 │  - NATO phonetics ("November 9 Delta...") │   │
+│                                 │  - Disambiguates without requiring "GHz"  │   │
 │                                 │  - Flexible order (call first / band 1st) │   │
 │                                 │  - Freq -> Band auto-mapping (10368->10G) │   │
 │                                 │  - Default band logic (10 GHz)            │   │
-│                                 └─────────────────────┬─────────────────────┘   │
-│                                                       │                         │
-│                                                       ▼                         │
-│   ┌─────────────────────┐       ┌───────────────────────────────────────────┐   │
-│   │ Live Station State  │  ──>  │      Interactive Staging Engine           │   │
-│   │ - My Grid (GPS)     │       │  - Partial input prompts (what's missing) │   │
-│   │ - Target Grid (UI)  │       │  - Hotwords: "save" / "save it" / "cancel"│   │
-│   │ - UTC Time (GNSS)   │       │  - Presents ready entry for voice approval│   │
-│   │ - Dist & Bearing    │       └─────────────────────┬─────────────────────┘   │
-│   └─────────────────────┘                             │                         │
-│                                                       ▼                         │
-│                                 ┌───────────────────────────────────────────┐   │
-│                                 │      QsoLogManager (NVS Storage)          │   │
-│                                 │  - Persistent QSO ring buffer (NVS)       │   │
-│                                 │  - Cabrillo / ADIF / CSV export           │   │
-│                                 │  - 'log list', 'log stats', 'log undo'    │   │
-│                                 └───────────────────────────────────────────┘   │
+│                                 └───────────────┬───────────────────────────┘   │
+│                                                 │                               │
+│                   ┌─────────────────────────────┴─────────────────────────────┐ │
+│                   ▼                                                           ▼ │
+│   ┌───────────────────────────────┐           ┌─────────────────────────────┐   │
+│   │    Target Setting Engine      │           │    Direct-to-Save Engine    │   │
+│   │  - Sets Grid in AppController │           │  - Auto-commits complete QSO│   │
+│   │  - Updates Display Row 2      │           │  - Echoes text confirmation │   │
+│   │  - Immediate calculation      │           │  - Prompts only if partial  │   │
+│   └───────────────┬───────────────┘           └──────────────┬──────────────┘   │
+│                   │                                          │                  │
+│                   ▼                                          ▼                  │
+│   ┌───────────────────────────────┐           ┌─────────────────────────────┐   │
+│   │ Display UI (Round Screen)     │           │ QsoLogManager (NVS Storage) │   │
+│   │ - Target grid & bearing needle│           │ - Persistent QSO ring buffer│   │
+│   │ - 10s auto-dismiss pop-up card│           │ - Cabrillo, ADIF, CSV export│   │
+│   └───────────────────────────────┘           │ - Delete by number, undo    │   │
+│                                               └─────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -60,249 +62,225 @@ The GNSS Compass already continuously computes and maintains the critical situat
 3. **UTC Timestamp:** Precise GPS-synchronized date and time (hours, minutes, seconds, epoch).
 4. **Geodesics:** Exact geodesic path distance (km) and true bearing (azimuth).
 
-By combining the newly implemented **Bluetooth Serial Interface (BLE UART)** with the voice dictation built into modern smartphone keyboards (Google Gboard, Apple iOS Dictation), the operator can simply tap the microphone icon in their mobile terminal and speak natural commands like:
-> **"log n9dk 10 GHz"** $\rightarrow$ **"save it"**
-
-This design details the conversational state machine, phonetics lexer, band/frequency deduction rules, default 10 GHz operation, non-volatile log storage, and Cabrillo/ADIF export capabilities.
+By combining the **Bluetooth Serial Interface (BLE UART)** with the voice dictation built into modern smartphone keyboards (Google Gboard, Apple iOS Dictation), the operator can simply tap the microphone icon in their mobile terminal and speak single natural commands like:
+> **"log n9dk"** $\rightarrow$ **Instantly logged to 10 GHz with on-display visual confirmation!**
 
 ---
 
-## 2. Voice User Experience & Conversational State Machine
+## 2. Voice User Experience & Operational Flow
 
-Mobile voice-to-text dictation is fast but occasionally omits words or transcribes punctuation. The logging engine must therefore be **error-tolerant, conversational, and reversible**.
+Field operation requires maximum speed and minimum keystrokes. Rather than forcing multi-step confirmation rituals, the system uses a **direct-to-save** pipeline with immediate feedback and instant undo/delete capabilities.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle: Boot / Ready
 
-    Idle --> Staging: "log [tokens...]"
-    
-    state Staging {
-        [*] --> Evaluating
-        Evaluating --> Incomplete: Missing Callsign
-        Evaluating --> Ready: Valid Callsign + Band/Default
-        
-        Incomplete --> Evaluating: Spoken Callsign / Band
-        Ready --> Ready: Spoken Band / Frequency Override
+    Idle --> DirectSave: "log <call> [band/freq]" (Complete)
+    Idle --> DirectSave: "log <call>" (Uses Default 10 GHz)
+    Idle --> IncompleteStaging: "log" (Missing Callsign)
+    Idle --> SetTarget: "target <gridsquare>"
+
+    state DirectSave {
+        [*] --> CommitNVS
+        CommitNVS --> TerminalEcho
+        TerminalEcho --> TriggerScreenModal
+    }
+    DirectSave --> Idle: Done (1-shot)
+
+    state IncompleteStaging {
+        [*] --> PromptMissing
+        PromptMissing --> IncompleteStaging: Partial Input
+        PromptMissing --> DirectSave: Callsign Provided
+        PromptMissing --> Idle: Hotword "cancel"
     }
 
-    Staging --> Idle: Hotword "cancel" / "abort" / "discard"
-    Staging --> Idle: Hotword "save" / "save it" / "confirm" (Commits to NVS)
-    Staging --> Idle: Inactivity Timeout (60s)
+    state SetTarget {
+        [*] --> UpdateGridEditor
+        UpdateGridEditor --> RecalculateGeodesy
+        RecalculateGeodesy --> RedrawScreen
+    }
+    SetTarget --> Idle: Done
 ```
 
-### 2.1 Scenario Walkthroughs
+### 2.1 Fast-Path: Direct-to-Save (Zero Prompting)
+When complete arguments are provided, the QSO is **immediately committed to persistent storage** without requiring a second "save" confirmation word:
 
-#### Scenario A: Standard One-Shot Voice Log (Callsign + Band)
-The operator speaks the callsign and band in any order:
-* **Spoken input:** `"log n9dk 10 GHz"` *(or `"log 10 GHz n9dk"`)*
-* **Compass terminal output:**
+#### Example 1: Default 10 GHz Band (A Single Spoken Phrase)
+* **Operator speaks:** `"log n9dk"`
+* **Compass terminal echoes:**
   ```text
-  [QSO READY]
-    Callsign: N9DK
-    Band:     10 GHz (10368.100 MHz)
-    UTC Time: 21:34z
-    My Grid:  CM87wa
-    His Grid: CM88qk (Target)
-    Geodesy:  118.2 km @ 342 deg
-  --------------------------------------------------
-  Say 'save' (or 'save it') to log, or 'cancel' to discard.
+  [QSO LOGGED #15] N9DK | 10 GHz (10368.100 MHz) | 21:34z | CM87wa -> CM88qk (118.2 km @ 342 deg)
   > 
   ```
-* **Operator speaks:** `"save it"` *(or `"save"`, `"confirm"`, or simply hits Send)*
-* **Compass terminal output:**
+* **Compass 2.1" Display:** Instantly shows the **QSO Pop-Up Card** on the LCD screen (described in Section 3) with a 10-second auto-dismiss timer.
+* **Result:** Contact logged in one single phrase!
+
+#### Example 2: Band Specified Without "GHz"
+The suffix `"GHz"` is **not required**. Numbers like `10`, `24`, `47`, `76`, etc., are automatically recognized as microwave gigahertz bands:
+* **Operator speaks:** `"log n9dk 24"` *(or reversed: `"log 24 n9dk"`)*
+* **Compass terminal echoes:**
   ```text
-  [QSO LOG] Logged #14: N9DK on 10 GHz in CM88qk (118.2 km). 73!
+  [QSO LOGGED #16] N9DK | 24 GHz (24192.100 MHz) | 21:35z | CM87wa -> CM88qk (118.2 km @ 342 deg)
+  > 
+  ```
+
+#### Example 3: Exact Frequency in Digits
+* **Operator speaks:** `"log n9dk 10368.1"` *(or `"log 10368.100 n9dk"`)*
+* **Compass terminal echoes:**
+  ```text
+  [QSO LOGGED #17] N9DK | 10 GHz (10368.100 MHz) | 21:36z | CM87wa -> CM88qk (118.2 km @ 342 deg)
   > 
   ```
 
 ---
 
-#### Scenario B: 10 GHz Default Band Mode (Two Spoken Words Total)
-Because 10 GHz accounts for the vast majority of microwave contacts, the system defaults to 10 GHz when no band is specified:
-* **Spoken input:** `"log n9dk"`
-* **Compass terminal output:**
-  ```text
-  [QSO READY]
-    Callsign: N9DK
-    Band:     10 GHz [Default]
-    UTC Time: 21:35z
-    My Grid:  CM87wa  ->  His Grid: CM88qk
-    Geodesy:  118.2 km @ 342 deg
-  --------------------------------------------------
-  Say 'save' to confirm 10 GHz, speak band/freq to change, or 'cancel'.
-  > 
-  ```
-* **Operator speaks:** `"save"`
-* **Result:** Contact logged in NVS. Total operator effort: **two spoken words**.
+### 2.2 Error Recovery & Deleting Entries
+
+Because contacts are logged immediately, field error correction is simple:
+
+1. **Quick Undo (`log undo`):**
+   * If an accidental contact was logged:
+     ```text
+     > log undo
+     [QSO LOG] Removed last entry #17 (N9DK on 10 GHz). Log contains 16 contacts.
+     ```
+2. **Delete by Number (`log delete <#>` or `log del <#>`):**
+   * If a previous entry needs to be removed:
+     ```text
+     > log delete 3
+     [QSO LOG] Deleted QSO #3 (W6OP/R on 10 GHz). Entries re-indexed (15 contacts remain).
+     ```
 
 ---
 
-#### Scenario C: Exact Frequency Provided in Digits
-When an operator wants to log the exact operating frequency (e.g. 10368.100 MHz, 5760.100 MHz, 24192.100 MHz):
-* **Spoken input:** `"log n9dk 10368.1"` *(or `"log 10368.100 n9dk"`)*
-* **Compass terminal output:**
-  ```text
-  [QSO READY]
-    Callsign: N9DK
-    Band:     10 GHz
-    Freq:     10368.100 MHz
-    UTC Time: 21:36z
-    My Grid:  CM87wa  ->  CM88qk
-  Say 'save' to confirm, or 'cancel'.
-  > 
-  ```
-* **Operator speaks:** `"save"`
-* **Result:** Both the frequency (`10368.100 MHz`) and the derived band (`10 GHz`) are committed to the log entry.
+### 2.3 Partial Input & Fallback Prompting
 
----
-
-#### Scenario D: Partial Input & Clarification Prompts
-If the operator begins without specifying a callsign:
-* **Spoken input:** `"log"`
-* **Compass terminal output:**
+If the operator issues an incomplete command (e.g. just `"log"`):
+* **Operator speaks:** `"log"`
+* **Compass replies:**
   ```text
   [QSO] Callsign? (e.g. 'N9DK' or 'November Nine Delta Kilo', or 'cancel')
   > 
   ```
-* **Spoken input:** `"n9dk"`
-* **Compass terminal output:**
+* **Operator speaks:** `"n9dk"`
+* **Compass immediately completes and saves:**
   ```text
-  [QSO READY]
-    Callsign: N9DK
-    Band:     10 GHz [Default]
-    ...
-  Say 'save' to confirm, or 'cancel'.
+  [QSO LOGGED #18] N9DK | 10 GHz [Default] | 21:38z | CM87wa -> CM88qk (118.2 km @ 342 deg)
   > 
   ```
+* **Hotword "cancel":** Saying `"cancel"` at any prompt immediately aborts without logging.
 
 ---
 
-#### Scenario E: Immediate Cancellation via Hotword
-If the operator changes their mind or speech recognition garbles the callsign:
-* **Spoken input:** `"cancel"` *(or `"abort"`, `"discard"`, `"stop"`)*
-* **Compass terminal output:**
+### 2.4 Remote Target Setting (`target <gridsquare>`)
+
+Microwave operators regularly coordinate a schedule with a distant station located in a new grid square. Rather than reaching up to turn the rotary dial or tap the touch screen, the operator can update the target grid directly via voice dictation:
+
+* **Operator speaks:** `"target CM88qk"` *(or NATO phonetics: `"target charlie mike 88 quebec kilo"`)*
+* **Compass terminal echoes:**
   ```text
-  [QSO] Log entry discarded.
+  [TARGET] Target set to CM88qk (Bearing: 342.3 deg, Distance: 118.2 km)
   > 
   ```
-* The staging buffer is wiped, and the CLI returns immediately to standard prompt mode.
+* **Display Behavior:**
+  * Immediately updates Row 2 on the round LCD to `CM88qk`.
+  * Recalculates bearing and points the dual-antenna compass needle toward the new station.
+  * Updates geodesic distance and ARRL contest distance.
+  * No confirmation word required — executes immediately.
 
 ---
 
-## 3. Phonetics Lexer & Voice Dictation Normalizer
+## 3. On-Display QSO Confirmation Pop-Up Card
 
-Mobile voice dictation engines (Gboard / iOS) introduce speech-to-text variations. The `VoiceQsoParser` normalizes input through a multi-pass pipeline:
+To allow the operator to verify logging while looking at the mast/tripod display without glancing down at their phone screen, the firmware displays a temporary **QSO Card Overlay** on the 480×480 round screen:
 
-### 3.1 Punctuation & Speech-to-Text Filtering
-1. **Preserve Decimal Points:** Digits with internal decimal points (`10368.100`, `10.368`, `5.7`) are preserved.
-2. **Strip Extraneous Punctuation:** Commas, colons, semicolons, question marks, exclamation marks, and trailing periods inserted by phone keyboards are stripped:
-   * `"log n9dk, 10 GHz."` $\rightarrow$ `"log n9dk 10 GHz"`
+```
+┌─────────────────────────────────────────────────────────┐
+│                 480 x 480 Round Display                 │
+│                                                         │
+│               ┌─────────────────────────┐               │
+│               │     *** QSO LOGGED ***  │               │
+│               │                         │               │
+│               │        N9DK / R         │  (Large Text) │
+│               │                         │               │
+│               │   10 GHz (10368.100)    │               │
+│               │   CM88qk  -  118.2 km   │               │
+│               │   Time: 21:34 UTC       │               │
+│               │                         │               │
+│               │       [  OK  ]          │  (Auto 10s)   │
+│               └─────────────────────────┘               │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
 
-### 3.2 NATO Phonetic Translation
-Operators frequently speak callsigns phonetically in high-noise environments. The parser recognizes standard NATO phonetics and collapses consecutive phonetic words into a callsign string:
-
-| Spoken Token | Mapped Character |
-| :--- | :--- |
-| `alpha`, `alfa` | **A** |
-| `bravo` | **B** |
-| `charlie` | **C** |
-| `delta` | **D** |
-| `echo` | **E** |
-| `foxtrot` | **F** |
-| `golf` | **G** |
-| `hotel` | **H** |
-| `india` | **I** |
-| `juliet`, `juliett` | **J** |
-| `kilo` | **K** |
-| `lima` | **L** |
-| `mike` | **M** |
-| `november` | **N** |
-| `oscar` | **O** |
-| `papa` | **P** |
-| `quebec` | **Q** |
-| `romeo` | **R** |
-| `sierra` | **S** |
-| `tango` | **T** |
-| `uniform` | **U** |
-| `victor` | **V** |
-| `whiskey` | **W** |
-| `x-ray`, `xray` | **X** |
-| `yankee` | **Y** |
-| `zulu` | **Z** |
-
-### 3.3 Spoken Numbers & Homophones
-Phone dictation often writes numbers as words or substitutes common homophones:
-* `zero` $\rightarrow$ `0`
-* `one`, `won` $\rightarrow$ `1`
-* `two`, `to`, `too` $\rightarrow$ `2`
-* `three`, `tree` $\rightarrow$ `3`
-* `four`, `for` $\rightarrow$ `4`
-* `five`, `fife` $\rightarrow$ `5`
-* `six` $\rightarrow$ `6`
-* `seven` $\rightarrow$ `7`
-* `eight`, `ate` $\rightarrow$ `8`
-* `nine` $\rightarrow$ `9`
-
-### 3.4 Rover & Portable Suffixes
-* `stroke rover`, `slash rover`, `rover` $\rightarrow$ `/R`
-* `stroke portable`, `slash portable`, `portable` $\rightarrow$ `/P`
-* `stroke 6`, `slash 6` $\rightarrow$ `/6`
-
-**Example:**
-* Input: `"November nine delta kilo stroke rover"` $\rightarrow$ Parsed callsign: `N9DK/R`
-* Input: `"whiskey six oscar papa"` $\rightarrow$ Parsed callsign: `W6OP`
+### Visual & Interactive Behavior:
+1. **Trigger:** Appears immediately upon any successful `log` save.
+2. **Layout:** Centered semi-transparent modal card (similar to `CalModal` and `RoverCard`).
+3. **Information Shown:**
+   * Big high-contrast callsign.
+   * Band and frequency.
+   * Target grid square and distance in km.
+   * Time in UTC.
+4. **Auto-Dismiss:** Automatically closes after **10 seconds** of inactivity, returning to normal compass navigation.
+5. **Instant Dismiss:** Tapping the `[ OK ]` button, touching anywhere on the screen, or clicking/turning the rotary knob dismisses the card immediately.
 
 ---
 
-## 4. Band & Frequency Mapping Rules
+## 4. Comprehensive Frequency & Band Mapping
 
-When numeric digits are provided, the parser automatically checks if they correspond to an amateur frequency and maps them to the appropriate contest band:
+Microwave contesting spans from 10 GHz up into the millimeter and sub-millimeter waves, as well as VHF/UHF coordination bands. The parser maps both plain band numbers (without needing `"GHz"`) and exact frequencies:
 
-| Spoken / Typed Frequency | Logged Frequency | Inferred Band | ARRL Cabrillo Band Code |
+### 4.1 Primary Microwave Bands (10 GHz & Up Contest)
+
+| Band Identifier (Voice / CLI) | Frequency Range | Nominal Calling Freq | Cabrillo Code | ADIF Band |
+| :--- | :--- | :--- | :--- | :--- |
+| **`10`**, `10G`, `10 GHz`, `10368` | 10.000 – 10.500 GHz | `10368.100 MHz` | `10G` | `3cm` |
+| **`24`**, `24G`, `24 GHz`, `24192` | 24.000 – 24.250 GHz | `24192.100 MHz` | `24G` | `1.2cm` |
+| **`47`**, `47G`, `47 GHz`, `47088` | 47.000 – 47.200 GHz | `47088.100 MHz` | `47G` | `6mm` |
+| **`76`**, `76G`, `76 GHz`, `76032`, `77.5` | 75.500 – 81.000 GHz | `76032.100 MHz` | `76G` | `4mm` |
+| **`122`**, `122G`, `122 GHz`, `122250` | 122.250 – 123.000 GHz | `122250.100 MHz` | `122G` | `2.5mm` |
+| **`134`**, `134G`, `134 GHz`, `134928` | 134.000 – 141.000 GHz | `134928.100 MHz` | `134G` | `2mm` |
+| **`241`**, `241G`, `241 GHz`, `241056` | 241.000 – 250.000 GHz | `241056.100 MHz` | `241G` | `1mm` |
+| **`light`**, `laser` | > 300 GHz | ~474 THz (Red laser) | `LIGHT` | `submm` |
+
+### 4.2 Sub-10 GHz Bands (VHF/UHF & Microwave Sprints)
+
+| Band Identifier (Voice / CLI) | Nominal Calling Freq | Cabrillo Code | ADIF Band |
 | :--- | :--- | :--- | :--- |
-| `10368`, `10368.1`, `10.368 GHz` | `10368.100 MHz` | **10 GHz** | `10G` |
-| `24192`, `24192.1`, `24 GHz` | `24192.100 MHz` | **24 GHz** | `24G` |
-| `47088`, `47 GHz` | `47088.100 MHz` | **47 GHz** | `47G` |
-| `5760`, `5760.1`, `5.7 GHz` | `5760.100 MHz` | **5.7 GHz** | `5.7G` |
-| `3456`, `3400`, `3.4 GHz` | `3456.100 MHz` | **3.4 GHz** | `3.4G` |
-| `2304`, `2400`, `2.3 GHz` | `2304.100 MHz` | **2.3 GHz** | `2.3G` |
-| `1296`, `1296.1`, `1.2 GHz` | `1296.100 MHz` | **1.2 GHz** | `1.2G` |
-| `902`, `903`, `902 MHz` | `902.100 MHz` | **902 MHz** | `902` |
-| `432`, `432.1`, `432 MHz` | `432.100 MHz` | **432 MHz** | `432` |
-| `222`, `222.1`, `222 MHz` | `222.100 MHz` | **222 MHz** | `222` |
-| `144`, `144.2`, `144 MHz` | `144.200 MHz` | **144 MHz** | `144` |
-| `50`, `50.1`, `50 MHz` | `50.100 MHz` | **50 MHz** | `50` |
-
-*Note: If the operator specifies arbitrary digits (e.g. `10368.250`), the exact numeric frequency is retained and stored in the QSO record.*
+| **`5.7`**, `5.7G`, `5760` | `5760.100 MHz` | `5.7G` | `6cm` |
+| **`3.4`**, `3.4G`, `3456`, `3400` | `3456.100 MHz` | `3.4G` | `9cm` |
+| **`2.3`**, `2.4`, `2304`, `2400` | `2304.100 MHz` | `2.3G` | `13cm` |
+| **`1.2`**, `1296` | `1296.100 MHz` | `1.2G` | `23cm` |
+| **`902`**, `903` | `902.100 MHz` | `902` | `33cm` |
+| **`432`** | `432.100 MHz` | `432` | `70cm` |
+| **`222`** | `222.100 MHz` | `222` | `1.25m` |
+| **`144`**, `2m` | `144.200 MHz` | `144` | `2m` |
+| **`50`**, `6m` | `50.100 MHz` | `50` | `6m` |
 
 ---
 
-## 5. Default Band Configuration
+## 5. Phonetics Lexer & Voice Dictation Normalizer
 
-To eliminate having to speak `"10 GHz"` on every contact:
-* **Default Setting:** `10 GHz` is active by default upon initial boot.
-* **CLI Configuration:**
-  ```text
-  > log default band 10 GHz
-  [QSO] Default band set to 10 GHz.
-  
-  > log default band 24 GHz
-  [QSO] Default band set to 24 GHz.
-  
-  > log default band none
-  [QSO] Default band disabled (band must be specified).
-  ```
-* **Persistence:** Stored in NVS under `"qso_cfg"` with key `"def_band"`.
+The `VoiceQsoParser` processes input through a flexible normalization pipeline:
+
+1. **Punctuation Stripping:** Commas, colons, question marks, and trailing periods inserted by smartphone keyboards are stripped, while preserving internal decimal points (`10368.1`, `5.7`, `77.5`).
+2. **NATO Phonetic Translation:** Words like `"November Nine Delta Kilo"` collapse into `N9DK`.
+3. **Phonetic Grid Parsing for `target`:** `"charlie mike 88 quebec kilo"` collapses into `CM88qk`.
+4. **Spoken Numbers & Homophones:** Words like `"zero"` $\rightarrow$ `0`, `"won"`/`"one"` $\rightarrow$ `1`, `"to"`/`"too"`/`"two"` $\rightarrow$ `2`, `"for"`/`"four"` $\rightarrow$ `4`, `"ate"`/`"eight"` $\rightarrow$ `8`.
+5. **Suffixes:** `"stroke rover"`, `"slash rover"`, `"rover"` $\rightarrow$ `/R`; `"portable"` $\rightarrow$ `/P`.
+6. **Argument Disambiguation Without "GHz":**
+   * Any token containing letters and a digit matching callsign structure is treated as a **callsign**.
+   * Any standalone number in `{10, 24, 47, 76, 122, 134, 241}` is treated as a **microwave GHz band**.
+   * Any number $\ge 50$ with $\ge 3$ digits (e.g. `144`, `432`, `1296`, `10368`) is treated as a **frequency in MHz**.
+   * Any token matching Maidenhead locator structure (2 letters, 2 digits, optional 2 or 4 letters) is recognized as a **grid square**.
 
 ---
 
-## 6. Data Model & Non-Volatile Storage (`QsoLogManager`)
+## 6. Persistent Storage & Capacity (`QsoLogManager`)
 
-Following the architecture of `RoverLogManager`, QSO records are stored in a dedicated NVS namespace (`"qso_log"`).
+QSO entries are stored in the ESP32-S3 non-volatile storage (NVS) using `Preferences`.
 
-### 6.1 Binary Record Layout (`QsoEntry`)
-
+### 6.1 Packed Struct (`QsoEntry`)
 ```cpp
 #pragma pack(push, 1)
 struct QsoEntry {
@@ -319,129 +297,75 @@ struct QsoEntry {
 ```
 
 * **Size per Entry:** Exactly **48 bytes**.
-* **Storage Footprint:**
-  * 100 QSOs = **4.8 KB**
-  * 250 QSOs = **12.0 KB**
-* **NVS Endurance:** The ESP32-S3 NOR flash has $\ge 100,000$ write cycles per sector. Even at 1,000 QSOs per season, wear is negligible ($< 0.1\%$ lifetime).
-
-### 6.2 Inspection & Stack Operations
-* `appendQso(const QsoEntry &qso)`: Appends to NVS stack.
-* `popLastQso()`: Removes the most recently logged QSO (undo).
-* `getQsoCount()`: Returns total logged contacts.
-* `clearLog()`: Clears all logged contacts (requires explicit confirmation).
+* **Capacity:** Default 100 QSOs (configurable up to 500, ~22 KB in NVS flash).
+* **NVS Endurance:** Over 100,000 write cycles; negligible wear in field use.
 
 ---
 
 ## 7. Command Reference & Contest Export
 
-All commands are integrated into `SerialCli` and work interchangeably over **Bluetooth Low Energy** and **USB Serial**.
+All commands operate identically over **Bluetooth Low Energy (BLE)** and **USB Serial**:
 
-### 7.1 Interactive Voice & Staging Commands
-
-| Command | Spoken Variants | Function |
+| Command | Examples / Spoken Variants | Function |
 | :--- | :--- | :--- |
-| `log <call> [band/freq]` | `"log n9dk 10 GHz"`, `"log 10 GHz n9dk"` | Stages a new QSO entry |
-| `log <call>` | `"log n9dk"`, `"log november 9 delta kilo"` | Stages QSO using default band (10 GHz) |
-| `save` | `"save it"`, `"save"`, `"confirm"`, `"yes"` | Commits staged QSO to NVS |
-| `cancel` | `"cancel"`, `"abort"`, `"discard"`, `"stop"` | Discards currently staged QSO |
-
-### 7.2 Log Inspection & Export Commands
-
-#### 1. Formatted QSO Table (`log list` or `log show`)
-```text
-> log list
-
-========================================================================================
-                               Contest QSO Log (14 contacts)                            
-========================================================================================
- #   UTC Time  Callsign     Band    Frequency     My Grid   His Grid   Dist (km)  Azimuth
-----------------------------------------------------------------------------------------
- 1   20:14z    W6OP/R       10 GHz  10368.100     CM87wa    CM88ql        114.6   345 deg
- 2   20:32z    K6BG         10 GHz  10368.100     CM87wa    CM87vq         22.1   128 deg
-...
-14   21:34z    N9DK         10 GHz  10368.100     CM87wa    CM88qk        118.2   342 deg
-========================================================================================
-```
-
-#### 2. Cabrillo Contest Export (`log export cabrillo`)
-Outputs the standard ARRL 10 GHz / VHF contest log submission format, ready to copy and paste directly into contest submission portals:
-```text
-> log export cabrillo
-
-START-OF-LOG: 3.0
-CONTEST: ARRL-10-GHZ
-CALLSIGN: N9DK/R
-GRID-LOCATOR: CM87wa
-QSO: 10G PH 2026-08-15 2014 N9DK/R CM87wa W6OP/R CM88ql
-QSO: 10G PH 2026-08-15 2032 N9DK/R CM87wa K6BG   CM87vq
-QSO: 10G PH 2026-08-15 2134 N9DK/R CM87wa N9DK   CM88qk
-END-OF-LOG:
-```
-
-#### 3. ADIF Export (`log export adif`)
-Outputs standard Amateur Data Interchange Format (`.adi`) records for importing into desktop logging software (N1MM, Log4OM, WSJT-X, Cloudlog, QRZ):
-```text
-> log export adif
-
-<ADIF_VER:5>3.1.4
-<EOH>
-<QSO_DATE:8>20260815 <TIME_ON:4>2014 <CALL:6>W6OP/R <BAND:3>3cm <FREQ:9>10368.100 <MODE:3>SSB <MY_GRIDSQUARE:6>CM87wa <GRIDSQUARE:6>CM88ql <DISTANCE:5>114.6 <EOR>
-<QSO_DATE:8>20260815 <TIME_ON:4>2134 <CALL:4>N9DK   <BAND:3>3cm <FREQ:9>10368.100 <MODE:3>SSB <MY_GRIDSQUARE:6>CM87wa <GRIDSQUARE:6>CM88qk <DISTANCE:5>118.2 <EOR>
-```
-
-#### 4. CSV Export (`log export csv`)
-```text
-> log export csv
-
-Index,Timestamp_UTC,Callsign,Band,Freq_MHz,MyGrid,HisGrid,Dist_km,Bearing_deg
-1,2026-08-15 20:14:00,W6OP/R,10 GHz,10368.100,CM87wa,CM88ql,114.6,345.1
-2,2026-08-15 21:34:00,N9DK,10 GHz,10368.100,CM87wa,CM88qk,118.2,342.3
-```
-
-#### 5. Contest Summary Statistics (`log stats`)
-```text
-> log stats
-
-=== Contest Log Statistics ===
-  Total QSOs Logged: 14
-  Unique Callsigns:  11
-  Unique Grids:      8
-  Total DX Distance: 1,482 km
-  Longest Contact:   218.4 km (WA6PEH in CM99)
-  Bands Worked:      10 GHz (12), 24 GHz (2)
-==============================
-```
-
-#### 6. Undo & Discard (`log undo`, `log clear`)
-* `log undo`: Prompts confirmation to delete the most recent QSO.
-* `log clear`: Prompts confirmation with `"Type 'yes' to clear entire log"`.
+| `log <call> [band/freq]` | `"log n9dk 10"`, `"log 24 n9dk"`, `"log n9dk 10368.1"` | Immediately logs QSO to NVS and shows pop-up card |
+| `log <call>` | `"log n9dk"`, `"log november 9 delta kilo"` | Immediately logs QSO with default band (10 GHz) |
+| `log undo` | `"log undo"` | Deletes the most recent QSO entry |
+| `log delete <#>` | `"log delete 3"`, `"log del 14"` | Deletes specific QSO by index and re-indexes |
+| `log clear` | `"log clear"` | Prompts confirmation to wipe log |
+| `target <grid>` | `"target CM88qk"`, `"target charlie mike 88 quebec kilo"` | Immediately sets target grid and updates display |
+| `log list` (or `log show`) | `"log list"` | Prints formatted ASCII table of all QSOs |
+| `log stats` | `"log stats"` | Displays contest totals (QSOs, DX km, bands, unique grids) |
+| `log export cabrillo` | `"log export cabrillo"` | Emits standard ARRL 10 GHz Cabrillo 3.0 log |
+| `log export adif` | `"log export adif"` | Emits standard ADIF records for desktop loggers |
+| `log export csv` | `"log export csv"` | Emits comma-separated values for spreadsheets |
+| `log default band <bnd>`| `"log default band 10 GHz"`, `"log default band 24"` | Configures default band in NVS |
 
 ---
 
-## 8. Implementation & Verification Plan
+## 8. Implementation & Phasing Plan
+
+To maintain modular development, thorough review, and clean unit testing, the implementation is designed into **three distinct phases**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ Phase 1: Core Domain & Storage (src/system/qso_entry.h, qso_log_manager.*)   │
-│ - QsoEntry packed struct definition                                         │
-│ - QsoLogManager NVS persistence with host unit test mocks                   │
-│ - Cabrillo, ADIF, and CSV export text formatting                            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ Phase 2: Voice & Phonetics Parser (src/protocol/voice_qso_parser.*)          │
-│ - NATO phonetics lookup table (Alpha-Zulu)                                  │
-│ - Spoken number translation (zero-nine, homophones)                         │
-│ - Suffix extraction (/R, /P)                                                │
-│ - Frequency-to-band evaluation (10368 -> 10 GHz)                            │
-│ - Flexible token order (call-band / band-call)                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ Phase 3: Conversational CLI Staging (src/protocol/serial_cli.*)              │
-│ - Staging buffer & interactive prompt loop                                  │
-│ - Hotword interception ("save", "save it", "cancel")                        │
-│ - Live context capture (My Grid, Target Grid, Time, Geodesy)                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│ Phase 4: Unit Testing & Verification                                        │
-│ - 100% C++ host unit test coverage in tests/test_calculations.cpp           │
-│ - Phonetics test cases, band detection test cases, export format checks     │
-│ - Complete simulated voice logging session                                  │
+│ Chat 1: Foundation — Core Data Model, Target Command & Phonetics Parser     │
+│ ─────────────────────────────────────────────────────────────────────────── │
+│ 1. src/system/qso_entry.h & src/system/qso_log_manager.*                   │
+│    - QsoEntry struct, NVS storage engine, delete-by-number, undo, clear     │
+│    - Cabrillo 3.0, ADIF, CSV formatters and contest statistics calculator   │
+│ 2. src/protocol/voice_qso_parser.*                                         │
+│    - NATO phonetics lexer (Alpha-Zulu, spoken digits, homophones)           │
+│    - Band disambiguation without requiring "GHz" (10, 24, 47, etc.)         │
+│    - Full frequency-to-band table (10 GHz to 241 GHz, laser, and VHF/UHF)   │
+│ 3. "target <gridsquare>" command integration in SerialCli                   │
+│    - Phonetic grid decoding and immediate AppController grid update         │
+│ 4. Comprehensive C++ Host Unit Tests in tests/test_calculations.cpp        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Chat 2: Interactive Voice CLI Loop & Display Pop-Up Card UI                │
+│ ─────────────────────────────────────────────────────────────────────────── │
+│ 1. src/ui/qso_card.* (or DisplayUi pop-up overlay)                         │
+│    - 480x480 round display modal card showing call, band, freq, grid, dist  │
+│    - 10-second non-blocking auto-dismiss timer                              │
+│    - Touch "OK" button & rotary click dismiss handler                       │
+│ 2. src/protocol/serial_cli.* integration                                    │
+│    - Direct-to-save one-shot logging logic                                  │
+│    - Automatic GPS context capture (My Grid, Target Grid, Time, Geodesy)   │
+│    - Pop-up trigger notification to DisplayUi via AppController             │
+│    - Partial input fallback prompting and hotword "cancel"                  │
+│    - "log delete <#>", "log undo", "log list", "log export" handlers        │
+│ 3. End-to-end integration tests & simulated voice logging sessions         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Chat 3: Final Review, End-to-End Field Validation & Documentation Updates   │
+│ ─────────────────────────────────────────────────────────────────────────── │
+│ 1. SERIAL.md guide updates with full voice dictation instructions & macros │
+│ 2. Real-time BLE UART loop testing with simulated voice transcript inputs   │
+│ 3. Clean PR preparation and final verification build                        │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
