@@ -4348,6 +4348,27 @@ void test_qso_export_formatters() {
     ASSERT_TRUE(listStr.find("10368.100 MHz") != std::string::npos);
     ASSERT_TRUE(listStr.find("W6OP/R") != std::string::npos);
 
+    // 6. Test 8-digit precision Maidenhead grid (e.g. CM87wa92 from high-precision GNSS)
+    QsoEntry q8(1789853820, "W6YX", "47 GHz", 47088100, "CM87wa92", "CM88qk", 118.2f, 342.3f);
+    mgr.appendQso(q8);
+
+    // Cabrillo reduces 8-char to 6-char
+    std::string cab8 = mgr.formatCabrillo("W6YX");
+    ASSERT_TRUE(cab8.find("W6YX       CM87wa") != std::string::npos);
+    ASSERT_TRUE(cab8.find("CM87wa92") == std::string::npos); // Ensure 8-digit is reduced for Cabrillo
+
+    // ADIF preserves full 8-digit precision in MY_GRIDSQUARE
+    std::string adif8 = mgr.formatAdif();
+    ASSERT_TRUE(adif8.find("<MY_GRIDSQUARE:8>CM87wa92") != std::string::npos);
+
+    // CSV preserves full 8-digit precision
+    std::string csv8 = mgr.formatCsv();
+    ASSERT_TRUE(csv8.find("CM87wa92,CM88qk") != std::string::npos);
+
+    // List table displays full 8-digit grid
+    std::string list8 = mgr.formatList();
+    ASSERT_TRUE(list8.find("CM87wa92") != std::string::npos);
+
     PASS();
 }
 

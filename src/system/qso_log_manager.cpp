@@ -337,13 +337,22 @@ std::string QsoLogManager::formatCabrillo(const std::string &myCall,
         int y, m, d, hh, mm, ss;
         epochToDateTime(qso.timestamp, y, m, d, hh, mm, ss);
         std::string cabBand = VoiceQsoParser::bandToCabrillo(qso.band);
+
+        // Cabrillo 3.0 specification for ARRL 10 GHz and VHF/Microwave contests
+        // requires 6-character Maidenhead locator exchanges (e.g. CM87wa).
+        // Truncate 8-digit locators to 6 digits for contest log robot compliance.
+        char myGrid6[7] = {0};
+        std::strncpy(myGrid6, qso.my_grid, 6);
+        char hisGrid6[7] = {0};
+        std::strncpy(hisGrid6, qso.his_grid, 6);
+
         char line[256];
-        snprintf(line, sizeof(line), "QSO: %-5s PH %04d-%02d-%02d %02d%02d %-10s %-8s %-10s %-8s\r\n",
+        snprintf(line, sizeof(line), "QSO: %-5s PH %04d-%02d-%02d %02d%02d %-10s %-6s %-10s %-6s\r\n",
                  cabBand.c_str(), y, m, d, hh, mm,
                  myCall.empty() ? "NOCALL" : myCall.c_str(),
-                 qso.my_grid,
+                 myGrid6,
                  qso.callsign,
-                 qso.his_grid);
+                 hisGrid6);
         out += line;
     }
 
