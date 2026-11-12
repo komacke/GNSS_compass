@@ -62,7 +62,13 @@ esptool --chip esp32s3 -p /dev/ttyACM0 -b 921600 write_flash \
 * `0x100000`: Flash offset for the application image (starts at 1.0 MB, reserving 512 KB for high-capacity NVS logging and settings).
 
 > [!TIP]
-> Once the board has been partitioned with the 16MB layout, future application-only firmware updates can simply flash the single binary directly:
+> You can also pass `--skip-flashed` (`-s`) to `write_flash`. `esptool` will query the device's on-chip flash MD5 and automatically skip erasing and writing the partition table if it already matches:
+> ```bash
+> esptool --chip esp32s3 -p /dev/ttyACM0 -b 921600 write_flash --skip-flashed \
+>     0x8000 gps_compass.ino.partitions.bin \
+>     0x100000 gps_compass.ino.esp32s3.bin
+> ```
+> Once the board has been partitioned with the 16MB layout, future application-only updates can also simply flash the single binary directly:
 > ```bash
 > esptool --chip esp32s3 -p /dev/ttyACM0 -b 921600 write_flash 0x100000 gps_compass.ino.esp32s3.bin
 > ```

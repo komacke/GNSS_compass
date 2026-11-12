@@ -70,10 +70,17 @@ resp="${resp,,}"
 resp="${resp:-y}"
 
 if [[ "$resp" == "y" ]]; then
+    # Check if esptool supports --skip-flashed to automatically query on-chip
+    # flash MD5 and skip writing the partition table if it already matches.
+    SKIP_FLAG=""
+    if esptool write-flash --help 2>&1 | grep -q -- '--skip-flashed'; then
+        SKIP_FLAG="--skip-flashed"
+    fi
+
     if [ -f "$PARTITIONS_BIN" ]; then
-        esptool --chip esp32s3 --port "$SERIAL_PORT" --baud 921600 write-flash 0x8000 "$PARTITIONS_BIN" 0x100000 "$OUTPUT_BIN"
+        esptool --chip esp32s3 --port "$SERIAL_PORT" --baud 921600 write-flash $SKIP_FLAG 0x8000 "$PARTITIONS_BIN" 0x100000 "$OUTPUT_BIN"
     else
-        esptool --chip esp32s3 --port "$SERIAL_PORT" --baud 921600 write-flash 0x100000 "$OUTPUT_BIN"
+        esptool --chip esp32s3 --port "$SERIAL_PORT" --baud 921600 write-flash $SKIP_FLAG 0x100000 "$OUTPUT_BIN"
     fi
 else
     echo "Skipping install."
